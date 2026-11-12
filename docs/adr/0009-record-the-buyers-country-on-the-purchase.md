@@ -1,7 +1,12 @@
 # Record the buyer's country on the purchase, at the moment of sale
 
-A purchasing-power price is only fair in the country it was given for. So every purchase stores the country it was made from (`purchases.country`), and later checks read it from there: a discounted purchase only plays in that country (`checkPppAccess`), and a refund on it gives back what was paid. We could have resolved the country again on every visit instead, but then a learner's price and access would change as they travel, and nobody could say afterwards what a purchase was sold at.
+Record the buyer's resolved country on the Purchase at the moment of sale. Purchasing-power access checks compare that historical country with the Student's current country, so a discounted Purchase can be blocked when the Student travels. Keeping this restriction means accepting that travel can interrupt access in exchange for limiting use of country-specific discounts outside the country of purchase.
+
+Using only the current country would lose the sale-time reference needed for that comparison. The snapshot adds historical data we must preserve, but a country we did not record at purchase time cannot reliably be reconstructed later.
 
 ## Consequences
 
-A purchase made before this column existed has no country, and there is no way to recover it. Staff are exempt from the country check.
+- Country resolution can fail, so the snapshot may be missing. Access is not blocked when either the purchase country or the current country is unknown.
+- Platform Admins and the course's Instructor bypass the check. Free courses, courses with purchasing-power pricing disabled, and Purchases whose recorded country is currently in the full-price tier also bypass it.
+- The country is a snapshot; the pricing configuration is not. Access checks use the current course settings and country-to-tier mapping.
+- The amount paid is recorded separately. Refunds return that amount; they do not recalculate it from either country.

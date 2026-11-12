@@ -27,7 +27,7 @@ import {
 // ─── Refunds ───
 // Everything about Refund Requests: whether a Purchase may be refunded, raising
 // a Refund Request, and a Platform Admin deciding one. See GLOSSARY.md for the
-// language and docs/adr/0001–0004 for why it works the way it does.
+// language and docs/adr/0001, 0003 and 0004 for why it works the way it does.
 //
 // Every function takes the database first, so tests can hand in an in-memory
 // one. Uses positional parameters (project convention).
@@ -604,6 +604,10 @@ function findOpenRefundRequest(
 
 /**
  * Approves an Open Refund Request and ends what its Purchase granted.
+ *
+ * Enrollment ends at approval: ending it when the request is raised would
+ * lock out buyers whose requests are later declined. Waiting for payment
+ * would couple access to money movement and retain access if payment failed.
  *
  * - An Individual Purchase: the buyer loses their Enrollment, unless
  *   they also hold a Claimed Seat for the course (docs/adr/0004). Their progress stays

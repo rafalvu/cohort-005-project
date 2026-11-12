@@ -23,3 +23,15 @@ is a lie the type checker believes.
 Both switch the type checker off at the exact point you are least sure. If a
 value can be missing, narrow it with a check. If you cannot name the type,
 the shape is wrong — fix the shape.
+
+## Store money as integer cents
+
+Store every amount of money in an integer column containing cents. Calculate
+discounts in cents and round once with `Math.round` at the point of sale.
+Use `formatPrice(cents)` to display amounts. Floating-point dollar amounts
+introduce rounding errors, and SQLite has no true decimal type.
+
+## Use the existing Prettier configuration
+
+Format files with Prettier and the repository's existing `.prettierrc`.
+Do not change its settings to suit personal formatting preferences.
