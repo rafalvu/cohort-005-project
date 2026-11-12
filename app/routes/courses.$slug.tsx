@@ -1,3 +1,4 @@
+import { getLatestIndividualPurchase, getRefundForPurchase } from "~/lib/refunds.server";
 import { useEffect, useState } from "react";
 import { Link, useFetcher, useSearchParams } from "react-router";
 import { toast } from "sonner";
@@ -14,14 +15,10 @@ import {
   enrollments,
   lessonProgress,
   courseRatings,
-  purchases,
-  coupons,
-  refunds,
   videoWatchEvents,
   LessonProgressStatus,
-  RefundStatus,
 } from "~/db/schema";
-import { eq, and, or, sql, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, or, sql, inArray } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -52,7 +49,6 @@ import { resolveCountry } from "~/lib/country.server";
 import {
   calculatePppPrice,
   getCountryTierInfo,
-  getDiscountForCountry,
 } from "~/lib/ppp";
 import { parseFormData } from "~/lib/validation";
 import { MAX_RATING, MIN_RATING } from "~/lib/ratings";
@@ -114,7 +110,7 @@ function getCourseWithDetails(id: number) {
     ...course,
     modules: courseModules.map((mod) => ({
       ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
+      lessons: courseLessons.filter((l) => l.moduleId === mod.id).map(({ content, videoUrl, githubRepoUrl, ...lesson }) => ({ ...lesson, hasVideo: !!videoUrl })),
     })),
   };
 }
@@ -371,28 +367,6 @@ const REFUND_WINDOW_DAYS = 14;
 const REFUND_WATCH_LIMIT_SECONDS = 2 * 60 * 60;
 const REFUND_COMPLETION_LIMIT = 0.5;
 
-function getPurchaseForCourse(userId: number, courseId: number) {
-  return db
-    .select()
-    .from(purchases)
-    .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
-    .orderBy(sql`${purchases.createdAt} desc`)
-    .get();
-}
-
-function getRequestedRefund(purchaseId: number) {
-  return db
-    .select({ id: refunds.id })
-    .from(refunds)
-    .where(
-      and(
-        eq(refunds.purchaseId, purchaseId),
-        eq(refunds.status, RefundStatus.Requested)
-      )
-    )
-    .get();
-}
-
 function getCompletedLessonCount(userId: number, lessonIds: number[]) {
   if (lessonIds.length === 0) return 0;
 
@@ -448,10 +422,10 @@ function getRefundOffer(
   userId: number,
   course: { id: number; price: number }
 ) {
-  const purchase = getPurchaseForCourse(userId, course.id);
+  const purchase = getLatestIndividualPurchase(userId, course.id);
 
   if (!purchase) return null;
-  if (getRequestedRefund(purchase.id)) return null;
+  if (getRefundForPurchase(purchase.id)) return null;
 
   const purchasedDay = asDayString(new Date(purchase.createdAt));
   const windowEnd = new Date(purchase.createdAt);
@@ -476,20 +450,7 @@ function getRefundOffer(
     return null;
   }
 
-  const claimedSeat = db
-    .select({ id: coupons.id })
-    .from(coupons)
-    .where(
-      and(eq(coupons.purchaseId, purchase.id), isNotNull(coupons.redeemedAt))
-    )
-    .get();
-
-  if (claimedSeat) return null;
-
-  // A purchasing-power price is refunded at the price that was paid, not at
-  // the list price of the course.
-  const pppDiscount = getDiscountForCountry(purchase.country);
-  const amount = pppDiscount > 0 ? purchase.amountPaid : course.price;
+  const amount = purchase.amountPaid;
 
   return { amount, lastDayInWindow };
 }

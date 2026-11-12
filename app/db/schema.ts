@@ -242,15 +242,16 @@ export const refunds = sqliteTable(
       .default(RefundStatus.Requested),
     // The learner's own words, in the box on the course page.
     reason: text("reason").notNull(),
-    // Null until someone approves — a declined request refunds nothing.
+    // Actual money returned; approval alone does not record a payment.
     amountRefunded: integer("amount_refunded"),
+    amountApproved: integer("amount_approved"),
     requestedAt: text("requested_at")
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
     resolvedAt: text("resolved_at"),
     resolvedByUserId: integer("resolved_by_user_id").references(() => users.id),
   },
-  (table) => [index("refunds_purchase_idx").on(table.purchaseId)]
+  (table) => [uniqueIndex("refunds_purchase_idx").on(table.purchaseId)]
 );
 
 export const teams = sqliteTable("teams", {
@@ -367,4 +368,12 @@ export const videoWatchEvents = sqliteTable("video_watch_events", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+});
+
+// Immutable historical copy, removed from active progress in the same transaction.
+export const refundProgressArchives = sqliteTable("refund_progress_archives", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  refundId: integer("refund_id").notNull().unique().references(() => refunds.id),
+  snapshot: text("snapshot").notNull(),
+  archivedAt: text("archived_at").notNull(),
 });

@@ -95,7 +95,7 @@ function getCourseWithDetails(id: number) {
     ...course,
     modules: courseModules.map((mod) => ({
       ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
+      lessons: courseLessons.filter((l) => l.moduleId === mod.id).map(({ content, videoUrl, githubRepoUrl, ...lesson }) => ({ ...lesson, hasVideo: !!videoUrl })),
     })),
   };
 }

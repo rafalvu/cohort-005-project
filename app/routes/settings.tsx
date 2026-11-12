@@ -55,9 +55,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw data("User not found.", { status: 404 });
   }
 
-  const pendingRefundRequests = db
+  const refundRequests = db
     .select({
       id: refunds.id,
+      status: refunds.status,
       courseTitle: courses.title,
       courseSlug: courses.slug,
       amountPaid: purchases.amountPaid,
@@ -68,10 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     .innerJoin(purchases, eq(refunds.purchaseId, purchases.id))
     .innerJoin(courses, eq(purchases.courseId, courses.id))
     .where(
-      and(
-        eq(purchases.userId, currentUserId),
-        eq(refunds.status, RefundStatus.Requested)
-      )
+      eq(purchases.userId, currentUserId)
     )
     .all();
 
@@ -83,7 +81,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       bio: currentUser.bio,
       role: currentUser.role,
     },
-    pendingRefundRequests,
+    refundRequests,
   };
 }
 
@@ -122,7 +120,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { user, pendingRefundRequests } = loaderData;
+  const { user, refundRequests } = loaderData;
   const fetcher = useFetcher();
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -209,18 +207,16 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
         </CardContent>
       </Card>
 
-      {pendingRefundRequests.length > 0 && (
+      {refundRequests.length > 0 && (
         <Card className="mt-8 max-w-md">
           <CardHeader>
-            <h2 className="text-lg font-semibold">Pending refund request</h2>
+            <h2 className="text-lg font-semibold">Refund requests</h2>
             <p className="text-sm text-muted-foreground">
-              {pendingRefundRequests.length === 1
-                ? "One refund request is awaiting review."
-                : `${pendingRefundRequests.length} refund requests are awaiting review.`}
+              View the status of your refund requests.
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            {pendingRefundRequests.map((refundRequest) => (
+            {refundRequests.map((refundRequest) => (
               <div key={refundRequest.id} className="rounded-md border p-3">
                 <div className="flex items-start justify-between gap-3">
                   <Link
@@ -230,7 +226,7 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                     {refundRequest.courseTitle}
                   </Link>
                   <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                    Pending refund request
+                    {refundRequest.status === RefundStatus.Requested ? "Pending review" : refundRequest.status === RefundStatus.Approved ? "Approved" : "Declined"}
                   </span>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -238,6 +234,8 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                   {new Date(refundRequest.requestedAt).toLocaleDateString()}
                 </p>
                 <p className="mt-2 text-sm">{refundRequest.reason}</p>
+                {refundRequest.status === RefundStatus.Approved && <p className="mt-2 text-sm text-muted-foreground">Course access has ended and progress has been archived. Buying again starts from zero. Approval does not confirm that money has been returned.</p>}
+                {refundRequest.status === RefundStatus.Declined && <p className="mt-2 text-sm text-muted-foreground">Your access and progress are unchanged.</p>}
               </div>
             ))}
           </CardContent>

@@ -10,6 +10,7 @@ import {
   GraduationCap,
   MessageSquare,
   Shield,
+  Undo2,
   Tag,
   Users,
   UsersRound,
@@ -50,6 +51,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { label: "Refund requests", to: "/admin/refunds", icon: <Undo2 className="size-4" />, roles: [UserRole.Admin] },
   {
     label: "Browse Courses",
     to: "/courses",

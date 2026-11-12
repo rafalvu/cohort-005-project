@@ -1,5 +1,5 @@
 import { data } from "react-router";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { db } from "~/db";
 import {
   UserRole,
@@ -39,6 +39,7 @@ function findPurchase(userId: number, courseId: number) {
     .select()
     .from(purchases)
     .where(and(eq(purchases.userId, userId), eq(purchases.courseId, courseId)))
+    .orderBy(desc(purchases.id))
     .get();
 }
 
@@ -199,4 +200,13 @@ export async function requireInstructorOrAdmin(request: Request) {
   }
 
   return { userId, user, isAdmin: user.role === UserRole.Admin };
+}
+
+export async function requireAdmin(request: Request) {
+  const userId = await requireUserId(request);
+  const user = getUserById(userId);
+  if (user?.role !== UserRole.Admin) {
+    throw data("Only admins can manage refund requests.", { status: 403 });
+  }
+  return user;
 }

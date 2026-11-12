@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import * as schema from "../app/db/schema";
 import {
+  RefundStatus,
   UserRole,
   CourseStatus,
   LessonProgressStatus,
@@ -64,6 +65,7 @@ async function seed() {
 
   // Drop and recreate tables for a clean seed
   sqlite.exec(`
+    DROP TABLE IF EXISTS refund_progress_archives;
     DROP TABLE IF EXISTS comments;
     DROP TABLE IF EXISTS course_ratings;
     DROP TABLE IF EXISTS video_watch_events;
@@ -2735,6 +2737,40 @@ This course is still in draft while the cluster examples are rewritten against t
   }
 
   console.log(`Created ${watchEventRows.length} video watch events.`);
+
+  // Refund review fixtures: one pending request and one archived approval.
+  for (const approved of [false, true]) {
+    const [learner] = db.insert(schema.users).values({
+      name: approved ? "Refund History Demo" : "Refund Review Demo",
+      email: approved ? "refund-history@student.dev" : "refund-review@student.dev",
+      role: UserRole.Student,
+    }).returning().all();
+    const [purchase] = db.insert(schema.purchases).values({ userId: learner.id, courseId: course1.id,
+      amountPaid: course1.price, createdAt: daysAgo(2) }).returning().all();
+    const [refund] = db.insert(schema.refunds).values({ purchaseId: purchase.id,
+      reason: "This course does not match the topics I need to study.",
+      status: approved ? RefundStatus.Approved : RefundStatus.Requested,
+      amountApproved: approved ? purchase.amountPaid : null,
+      resolvedAt: approved ? hoursAgo(1) : null,
+      resolvedByUserId: approved ? admin.id : null,
+    }).returning().all();
+    const lesson = db.select({ id: schema.lessons.id }).from(schema.lessons)
+      .innerJoin(schema.modules, eq(schema.lessons.moduleId, schema.modules.id))
+      .where(eq(schema.modules.courseId, course1.id)).get()!;
+    const progress = { userId: learner.id, lessonId: lesson.id,
+      status: LessonProgressStatus.Completed, completedAt: daysAgo(1) };
+    if (approved) {
+      db.insert(schema.refundProgressArchives).values({ refundId: refund.id, archivedAt: hoursAgo(1),
+        snapshot: JSON.stringify({ version: 1, userId: learner.id, courseId: course1.id,
+          lessonProgress: [progress], quizAttempts: [], quizAnswers: [], videoWatchEvents: [], enrollments: [] }),
+      }).run();
+    } else {
+      db.insert(schema.enrollments).values({ userId: learner.id, courseId: course1.id }).run();
+      db.insert(schema.lessonProgress).values(progress).run();
+      db.insert(schema.videoWatchEvents).values({ userId: learner.id, lessonId: lesson.id,
+        eventType: "progress", positionSeconds: 180 }).run();
+    }
+  }
 
   // ─── Summary ───
 

@@ -730,7 +730,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonProgressMap: Record<number, string> = {};
 
   if (currentUserId) {
-    if (enrolled) {
+    if (enrolled && access.canViewContent) {
       // Mark lesson as in-progress when viewed
       markLessonInProgress(currentUserId, lessonId);
       const progress = getLessonProgress(currentUserId, lessonId);
@@ -773,7 +773,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     : [];
 
   // Render lesson content from Markdown to HTML server-side
-  const contentHtml = lesson.content
+  const contentHtml = canViewContent && lesson.content
     ? await renderMarkdown(lesson.content)
     : null;
 
@@ -800,7 +800,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   } | null = null;
   let bestAttempt: { score: number; passed: boolean } | null = null;
 
-  if (quizRecord) {
+  if (quizRecord && canViewContent) {
     const quizData = getQuizWithQuestions(quizRecord.id);
     if (quizData) {
       // Strip isCorrect from options so answers aren't leaked to the client
@@ -847,13 +847,13 @@ export async function loader({ params, request }: Route.LoaderArgs) {
       id: mod.id,
       title: mod.title,
     },
-    lesson,
+    lesson: canViewContent ? lesson : { ...lesson, content: null, videoUrl: null, githubRepoUrl: null },
     contentHtml,
     lessonStatus,
     enrolled,
     currentUserId,
-    prevLesson,
-    nextLesson,
+    prevLesson: prevLesson ? { id: prevLesson.id, title: prevLesson.title } : null,
+    nextLesson: nextLesson ? { id: nextLesson.id, title: nextLesson.title } : null,
     quiz,
     bestAttempt,
     lastWatchPosition,
@@ -880,6 +880,13 @@ export async function action({ params, request }: Route.ActionArgs) {
   const currentUserId = await getCurrentUserId(request);
   if (!currentUserId) {
     throw data("You must be logged in", { status: 401 });
+  }
+
+  await requireContentAccess(request, course.id);
+  const lesson = getLessonById(lessonId);
+  const mod = lesson ? getModuleById(lesson.moduleId) : null;
+  if (!lesson || mod?.courseId !== course.id) {
+    throw data("Lesson not found in this course", { status: 404 });
   }
 
   const formData = await request.formData();
@@ -953,6 +960,10 @@ export async function action({ params, request }: Route.ActionArgs) {
     const quizId = Number(formData.get("quizId"));
     if (isNaN(quizId)) {
       throw data("Invalid quiz ID", { status: 400 });
+    }
+
+    if (getQuizByLessonId(lessonId)?.id !== quizId) {
+      throw data("Quiz not found in this lesson", { status: 404 });
     }
 
     // Collect answers: form fields named "question-{questionId}" with value = optionId

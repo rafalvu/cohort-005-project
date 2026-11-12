@@ -92,7 +92,7 @@ function getCourseWithDetails(id: number) {
     ...course,
     modules: courseModules.map((mod) => ({
       ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
+      lessons: courseLessons.filter((l) => l.moduleId === mod.id).map(({ content, videoUrl, githubRepoUrl, ...lesson }) => ({ ...lesson, hasVideo: !!videoUrl })),
     })),
   };
 }
@@ -108,7 +108,7 @@ function getModuleWithLessons(id: number) {
     .orderBy(lessons.position)
     .all();
 
-  return { ...mod, lessons: moduleLessons };
+  return { ...mod, lessons: moduleLessons.map(({ content, videoUrl, githubRepoUrl, ...lesson }) => ({ ...lesson, hasVideo: !!videoUrl })) };
 }
 
 function isUserEnrolled(userId: number, courseId: number) {
@@ -358,7 +358,7 @@ export default function ModuleDetail({ loaderData }: Route.ComponentProps) {
             const status = lessonProgressMap[lesson.id];
             const isCompleted = status === LessonProgressStatus.Completed;
             const isInProgress = status === LessonProgressStatus.InProgress;
-            const hasVideo = !!lesson.videoUrl;
+            const hasVideo = lesson.hasVideo;
 
             const content = (
               <div className="flex items-center gap-3 rounded-md px-3 py-3 text-sm">
