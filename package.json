@@ -18,7 +18,8 @@
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx scripts/seed.ts",
     "db:migrate": "drizzle-kit migrate",
-    "loc": "git ls-files | grep -vE '(lock|.db|_snapshot.json)' | xargs wc -l"
+    "loc": "git ls-files | grep -vE '(lock|.db|_snapshot.json)' | xargs wc -l",
+    "prototype:notifications": "react-router dev --host 127.0.0.1 --port 5174"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

@@ -18,6 +18,7 @@ import {
   Sun,
   LogOut,
   Settings,
+  Bell,
 } from "lucide-react";
 
 interface CurrentUser {
@@ -41,6 +42,11 @@ interface SidebarProps {
   currentUser: CurrentUser | null;
   recentCourses?: RecentCourse[];
   isTeamAdmin?: boolean;
+  prototypeNotifications?: {
+    unread: number;
+    active: boolean;
+    open: () => void;
+  };
 }
 
 interface NavItem {
@@ -117,6 +123,7 @@ export function Sidebar({
   currentUser,
   recentCourses = [],
   isTeamAdmin = false,
+  prototypeNotifications,
 }: SidebarProps) {
   const currentUserRole = currentUser?.role ?? null;
   const [isDark, setIsDark] = useState(false);
@@ -143,6 +150,27 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
+        {prototypeNotifications && (
+          <button
+            onClick={prototypeNotifications.open}
+            aria-current={prototypeNotifications.active ? "page" : undefined}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+            style={
+              prototypeNotifications.active
+                ? { background: "var(--sidebar-accent)" }
+                : undefined
+            }
+          >
+            <Bell className="size-4" />
+            Notifications
+            <span
+              className="ml-auto rounded bg-primary px-1.5 text-xs text-primary-foreground"
+              aria-label={`${prototypeNotifications.unread} unread`}
+            >
+              {prototypeNotifications.unread}
+            </span>
+          </button>
+        )}
         {navItems
           .filter((item) => isVisible(item, currentUserRole))
           .map((item) => (

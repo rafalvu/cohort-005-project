@@ -1,5 +1,6 @@
-import { Outlet } from "react-router";
+import { Outlet, useSearchParams, useLocation } from "react-router";
 import type { Route } from "./+types/layout.app";
+import { NotificationsPrototype } from "~/components/notifications.prototype";
 import { Sidebar } from "~/components/sidebar";
 import { DevUI } from "~/components/dev-ui";
 import { Toaster } from "sonner";
@@ -185,7 +186,11 @@ export async function loader({ request }: Route.LoaderArgs) {
           course.courseId
         );
         const totalLessons = getTotalLessonCount(course.courseId);
-        const progress = calculateProgress(currentUserId, course.courseId, false);
+        const progress = calculateProgress(
+          currentUserId,
+          course.courseId,
+          false
+        );
         return {
           courseId: course.courseId,
           title: course.courseTitle,
@@ -226,6 +231,20 @@ export default function AppLayout({ loaderData }: Route.ComponentProps) {
     countries,
     isTeamAdmin: userIsTeamAdmin,
   } = loaderData;
+
+  const [prototypeParams] = useSearchParams();
+  const location = useLocation();
+  if (
+    import.meta.env.DEV &&
+    location.pathname === "/courses" &&
+    prototypeParams.has("variant")
+  ) {
+    return (
+      <NotificationsPrototype>
+        <Outlet />
+      </NotificationsPrototype>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
