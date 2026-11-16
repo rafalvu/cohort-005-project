@@ -2,7 +2,9 @@
 
 Decision ticket: [Prototype and choose the Notifications experience](https://github.com/rafalvu/cohort-005-project/issues/4).
 
-**Awaiting human feedback. No design is chosen. Do not merge this branch.**
+**Chosen by the user: C — List + detail. Do not merge this disposable branch.**
+
+[Canonical resolution](https://github.com/rafalvu/cohort-005-project/issues/4#issuecomment-6924218125). The archived alternatives remain available as the primary source; production implementation follows separately.
 
 ## Run and compare
 
