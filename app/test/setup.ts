@@ -16,14 +16,18 @@ const migrationsFolder = path.resolve(__dirname, "../../drizzle");
  * Uses the same Drizzle migrations as the live database, ensuring
  * test and production schemas are always in sync.
  */
-export function createTestDb() {
-  const sqlite = new Database(":memory:");
+export function createTestDb(
+  options: { filename?: string; migrationsFolder?: string } = {}
+) {
+  const sqlite = new Database(options.filename ?? ":memory:");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
   const testDb = drizzle(sqlite, { schema });
 
-  migrate(testDb, { migrationsFolder });
+  migrate(testDb, {
+    migrationsFolder: options.migrationsFolder ?? migrationsFolder,
+  });
 
   return testDb;
 }
@@ -74,4 +78,25 @@ export function seedBaseData(testDb: ReturnType<typeof createTestDb>) {
     .get();
 
   return { user, instructor, category, course };
+}
+
+/** Shared discussion context for future route action/loader tests. No Notifications are backfilled. */
+export function seedDiscussionData(testDb: ReturnType<typeof createTestDb>) {
+  const base = seedBaseData(testDb);
+  const module = testDb
+    .insert(schema.modules)
+    .values({ courseId: base.course.id, title: "Basics", position: 1 })
+    .returning()
+    .get();
+  const lesson = testDb
+    .insert(schema.lessons)
+    .values({ moduleId: module.id, title: "First lesson", position: 1 })
+    .returning()
+    .get();
+  const question = testDb
+    .insert(schema.comments)
+    .values({ lessonId: lesson.id, userId: base.user.id, body: "A question" })
+    .returning()
+    .get();
+  return { ...base, module, lesson, question };
 }
