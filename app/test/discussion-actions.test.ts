@@ -20,7 +20,10 @@ vi.mock("~/db", () => ({
     return holder.db;
   },
 }));
-import { action as lessonAction } from "~/routes/courses.$slug.lessons.$lessonId";
+import {
+  action as lessonAction,
+  loader as lessonLoader,
+} from "~/routes/courses.$slug.lessons.$lessonId";
 import {
   action as queueAction,
   loader as queueLoader,
@@ -81,6 +84,18 @@ async function post(
   return queue
     ? queueAction({ ...args, params: {} } as Parameters<typeof queueAction>[0])
     : lessonAction(args as Parameters<typeof lessonAction>[0]);
+}
+async function discussion() {
+  const url = `http://localhost/courses/${fixture.course.slug}/lessons/${fixture.lesson.id}`;
+  const cookie = await setCurrentUserId(new Request(url), fixture.instructor.id);
+  const result = await lessonLoader({
+    request: new Request(url, {
+      headers: { Cookie: cookie, "CF-IPCountry": "US" },
+    }),
+    params: { slug: fixture.course.slug, lessonId: String(fixture.lesson.id) },
+    context: {},
+  } as Parameters<typeof lessonLoader>[0]);
+  return result.comments;
 }
 function history(userId: number) {
   return listStoredNotifications(database(), { recipientId: userId }).rows;
@@ -158,7 +173,10 @@ test.each([false, true])(
     expect(results).toEqual([{ ok: true }, { ok: true }]);
     await post(fixture.instructor.id, fields, queue);
     expect(history(fixture.user.id)).toHaveLength(1);
-    expect(database().select().from(comments).all()).toHaveLength(2);
+    expect(await discussion()).toMatchObject([
+      { id: fixture.question.id, replies: [{ body: "Only once" }] },
+    ]);
+    expect((await discussion())[0].replies).toHaveLength(1);
   }
 );
 
@@ -204,7 +222,7 @@ test.each([false, true])(
           body: "Prior reply",
         })
         .run();
-    const before = database().select().from(comments).all().length;
+    const before = await discussion();
     const blocked = queue ? admins[0] : admins[1];
     database().run(
       sql.raw(
@@ -223,7 +241,7 @@ test.each([false, true])(
         queue
       )
     ).rejects.toThrow();
-    expect(database().select().from(comments).all()).toHaveLength(before);
+    expect(await discussion()).toEqual(before);
     for (const id of [...admins, fixture.user.id])
       expect(history(id)).toEqual([]);
   }
@@ -352,7 +370,10 @@ test("inactive feature preserves discussion posting without producing Notificati
   });
   for (const id of [...admins, fixture.instructor.id])
     expect(history(id)).toEqual([]);
-  expect(database().select().from(comments).all()).toHaveLength(2);
+  expect(await discussion()).toHaveLength(2);
+  expect(await discussion()).toEqual(
+    expect.arrayContaining([expect.objectContaining({ body: "Feature off" })])
+  );
 });
 
 test("unauthorized actors and malformed operation identities create no source or Notifications", async () => {
@@ -382,7 +403,10 @@ test("unauthorized actors and malformed operation identities create no source or
       body: "Missing identity",
     })
   ).rejects.toMatchObject({ init: { status: 400 } });
-  expect(database().select().from(comments).all()).toHaveLength(1);
+  expect(await discussion()).toMatchObject([
+    { id: fixture.question.id, replies: [] },
+  ]);
+  expect(await discussion()).toHaveLength(1);
   for (const id of [...admins, fixture.instructor.id])
     expect(history(id)).toEqual([]);
 });
@@ -397,7 +421,9 @@ test("operation identity conflicts are rejected; different operations stay disti
   await expect(
     post(fixture.user.id, { ...fields, body: "Different payload" })
   ).rejects.toMatchObject({ init: { status: 409 } });
-  const questionId = history(fixture.instructor.id)[0].questionId;
+  const questionId = (await discussion()).find(
+    (question) => question.body === "Original"
+  )!.id;
   await post(fixture.user.id, {
     intent: "edit-comment",
     commentId: String(questionId),
@@ -417,7 +443,7 @@ test("deleting a staff reply restores the unanswered queue without a new event",
     operationId: crypto.randomUUID(),
   };
   await post(fixture.instructor.id, fields, true);
-  const replyId = history(fixture.user.id)[0].replyId;
+  const replyId = (await discussion())[0].replies[0].id;
   await post(fixture.instructor.id, {
     intent: "delete-comment",
     commentId: String(replyId),
@@ -437,7 +463,10 @@ test("deleting a staff reply restores the unanswered queue without a new event",
   expect(history(fixture.instructor.id)).toEqual([]);
   expect(history(fixture.user.id)).toHaveLength(1);
   await post(fixture.instructor.id, fields, true);
-  expect(database().select().from(comments).all()).toHaveLength(2);
+  expect(await discussion()).toMatchObject([
+    { id: fixture.question.id, replies: [] },
+  ]);
+  expect(await discussion()).toHaveLength(1);
 });
 
 test("replaying a lesson reply through the Instructor queue preserves one event", async () => {
@@ -459,7 +488,10 @@ test("replaying a lesson reply through the Instructor queue preserves one event"
     true
   );
   expect(history(fixture.user.id)).toHaveLength(1);
-  expect(database().select().from(comments).all()).toHaveLength(2);
+  expect(await discussion()).toMatchObject([
+    { id: fixture.question.id, replies: [{ body: "Same reply" }] },
+  ]);
+  expect((await discussion())[0].replies).toHaveLength(1);
 });
 
 test("concurrent question submissions notify each recipient only once and can retry after rollback", async () => {
@@ -481,5 +513,8 @@ test("concurrent question submissions notify each recipient only once and can re
   ]);
   for (const id of [...admins, fixture.instructor.id])
     expect(history(id)).toHaveLength(1);
-  expect(database().select().from(comments).all()).toHaveLength(2);
+  expect(await discussion()).toHaveLength(2);
+  expect(await discussion()).toEqual(
+    expect.arrayContaining([expect.objectContaining({ body: "One new question" })])
+  );
 });
