@@ -61,4 +61,10 @@ Application PR [#24](https://github.com/rafalvu/cohort-005-project/pull/24) merg
 
 Documentation scope: parallel Spec review reported no findings. Standards review found two inaccurate inherited ADR statements: approval loses Enrollment even with a Claimed Seat, and country resolution ignores the development override. Both statements were corrected to match the preserved implementation. `bash -n` passed for the Wayfinder seed script and wizard template; neither workflow was executed.
 
-The documentation PR and final accepted main revision are recorded in the completion record after reviewed merges.
+## Accepted main and handoff
+
+Documentation PR [#25](https://github.com/rafalvu/cohort-005-project/pull/25) merged after both review axes completed and the two ADR findings were confirmed resolved. Accepted main is `2067dfbcec4b8bb5f4bbe40f8ccbbdfad4ec4cbb`. Its tree is identical to the combined reviewed/check-passing implementation tree `48820d9fdc830265b2fe095565c2094d0c10721e`.
+
+Combined verification at that tree: `npm run typecheck` passed, then `npm run test` passed all 405 tests in 15 files. `git diff --check 22539a2 HEAD` passed. Earlier application seed verification remains applicable: the second scope changed no schema, migrations or seed data. The application changes, terminology, skills, ADRs and branch dispositions are now available from main for subsequent implementation branches.
+
+The implementation branch incorporated accepted main and merged the integration tip before handoff. This evidence-only completion commit remains subject to the parent workflow's fresh merger and final two-axis integration review. Issue #12 stays open until that verification and final evidence PR complete; the issue closure records the ultimate main SHA without a self-referential commit.
