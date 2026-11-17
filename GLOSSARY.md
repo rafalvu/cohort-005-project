@@ -4,6 +4,16 @@ Cadence sells video courses to students. This glossary covers the language aroun
 
 ## Language
 
+### Notifications
+
+**Notification**:
+A saved update for one recipient about activity relevant to them in Cadence, linking to the relevant question, Refund Request, Purchase, or team's Seats. Its read state belongs to that recipient and is separate from whether the underlying activity has been handled or an email delivered.
+_Avoid_: Inbox entry, message, alert (for the saved update)
+
+**Notifications**:
+The recipient's list of saved Notifications in Cadence, where they can return to updates they missed.
+_Avoid_: Inbox, notification feed (as alternative product names)
+
 ### People
 
 **Student**:
