@@ -19,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const migrationsFolder = path.resolve(__dirname, "../drizzle");
 
-const sqlite = new Database("data.db");
+const sqlite = new Database(process.env.SEED_DATABASE_PATH ?? "data.db");
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("foreign_keys = ON");
 
@@ -63,8 +63,10 @@ function makeRandom(seed: number): () => number {
 async function seed() {
   console.log("Seeding database...");
 
+  // Notifications intentionally start empty: historical activity is never backfilled.
   // Drop and recreate tables for a clean seed
   sqlite.exec(`
+    DROP TABLE IF EXISTS notifications;
     DROP TABLE IF EXISTS comments;
     DROP TABLE IF EXISTS course_ratings;
     DROP TABLE IF EXISTS video_watch_events;

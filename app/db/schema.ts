@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   sqliteTable,
   text,
   integer,
@@ -374,3 +376,89 @@ export const videoWatchEvents = sqliteTable("video_watch_events", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const notificationKinds = [
+  "question_created",
+  "reply_created",
+  "refund_requested",
+  "refund_approved",
+  "refund_declined",
+  "seat_claimed",
+] as const;
+export type NotificationKind = (typeof notificationKinds)[number];
+
+// References only: content and authorization are resolved by the later read layer.
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    recipientId: integer("recipient_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceEventKey: text("source_event_key").notNull(),
+    kind: text("kind", { enum: notificationKinds }).notNull(),
+    lessonId: integer("lesson_id").references(() => lessons.id, {
+      onDelete: "cascade",
+    }),
+    questionId: integer("question_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
+    replyId: integer("reply_id").references(() => comments.id, {
+      onDelete: "cascade",
+    }),
+    refundRequestId: integer("refund_request_id").references(() => refunds.id, {
+      onDelete: "cascade",
+    }),
+    purchaseId: integer("purchase_id").references(() => purchases.id, {
+      onDelete: "cascade",
+    }),
+    teamId: integer("team_id").references(() => teams.id, {
+      onDelete: "cascade",
+    }),
+    seatId: integer("seat_id").references(() => coupons.id, {
+      onDelete: "cascade",
+    }),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    readAt: text("read_at"),
+  },
+  (t) => [
+    uniqueIndex("notifications_event_recipient_idx").on(
+      t.sourceEventKey,
+      t.recipientId
+    ),
+    index("notifications_recipient_order_idx").on(
+      t.recipientId,
+      t.createdAt,
+      t.id
+    ),
+    index("notifications_unread_order_idx")
+      .on(t.recipientId, t.createdAt, t.id)
+      .where(sql`${t.readAt} is null`),
+    index("notifications_expiry_idx").on(t.createdAt),
+    check(
+      "notifications_created_utc",
+      sql`strftime('%Y-%m-%dT%H:%M:%fZ', ${t.createdAt}) IS NOT NULL AND ${t.createdAt} = strftime('%Y-%m-%dT%H:%M:%fZ', ${t.createdAt})`
+    ),
+    check(
+      "notifications_read_utc",
+      sql`${t.readAt} IS NULL OR (strftime('%Y-%m-%dT%H:%M:%fZ', ${t.readAt}) IS NOT NULL AND ${t.readAt} = strftime('%Y-%m-%dT%H:%M:%fZ', ${t.readAt}))`
+    ),
+    check(
+      "notifications_event_key",
+      sql`length(trim(${t.sourceEventKey})) > 0`
+    ),
+    check(
+      "notifications_context",
+      sql`
+    (${t.kind} IN ('question_created', 'reply_created') AND ${t.lessonId} IS NOT NULL AND ${t.questionId} IS NOT NULL
+      AND ((${t.kind} = 'question_created' AND ${t.replyId} IS NULL) OR (${t.kind} = 'reply_created' AND ${t.replyId} IS NOT NULL))
+      AND ${t.refundRequestId} IS NULL AND ${t.purchaseId} IS NULL AND ${t.teamId} IS NULL AND ${t.seatId} IS NULL)
+    OR (${t.kind} IN ('refund_requested', 'refund_approved', 'refund_declined') AND ${t.refundRequestId} IS NOT NULL AND ${t.purchaseId} IS NOT NULL
+      AND ${t.lessonId} IS NULL AND ${t.questionId} IS NULL AND ${t.replyId} IS NULL AND ${t.teamId} IS NULL AND ${t.seatId} IS NULL)
+    OR (${t.kind} = 'seat_claimed' AND ${t.teamId} IS NOT NULL AND ${t.seatId} IS NOT NULL
+      AND ${t.lessonId} IS NULL AND ${t.questionId} IS NULL AND ${t.replyId} IS NULL AND ${t.refundRequestId} IS NULL AND ${t.purchaseId} IS NULL)`
+    ),
+  ]
+);
