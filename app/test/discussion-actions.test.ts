@@ -421,12 +421,13 @@ test("operation identity conflicts are rejected; different operations stay disti
   await expect(
     post(fixture.user.id, { ...fields, body: "Different payload" })
   ).rejects.toMatchObject({ init: { status: 409 } });
-  const questionId = (await discussion()).find(
+  const question = (await discussion()).find(
     (question) => question.body === "Original"
-  )!.id;
+  );
+  if (!question) throw new Error("Created Discussion Question was not visible");
   await post(fixture.user.id, {
     intent: "edit-comment",
-    commentId: String(questionId),
+    commentId: String(question.id),
     body: "Edited",
   });
   await post(fixture.user.id, fields);
