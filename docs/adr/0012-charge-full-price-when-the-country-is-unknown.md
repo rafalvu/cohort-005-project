@@ -1,6 +1,6 @@
 # Charge full price when the buyer's country is unknown
 
-Purchasing-power prices depend on the buyer's country, which `resolveCountry` takes from the `CF-IPCountry` header and nothing else. When the header is missing, the country is unknown and the buyer pays full price, so a page never waits on a network call to learn where the buyer is.
+Purchasing-power prices depend on the buyer's country, which `resolveCountry` takes from the development session override when present, then the `CF-IPCountry` header. When neither provides a country, the country is unknown and the buyer pays full price, so a page never waits on a network call to learn where the buyer is.
 
 ## Considered Options
 
@@ -9,4 +9,4 @@ Purchasing-power prices depend on the buyer's country, which `resolveCountry` ta
 
 ## Consequences
 
-A Student who would qualify for a purchasing-power price, but whose request does not come through Cloudflare, is charged full price.
+A Student who would qualify for a purchasing-power price, but whose request does not come through Cloudflare and has no development override, is charged full price. The development override is a test facility, not production country verification.

@@ -18,7 +18,7 @@ The original `main` and `feature/language-unification` history has no merge-base
 | `research/managed-notification-vendors` | `54d509349bededa5b2a70eef349037914da1c065` | `54d509349bededa5b2a70eef349037914da1c065` | Historical report only (54d5093); hosted/push vendor scope superseded by #11. No merge. |
 | `research/onesignal-browser-binding` | `52631364eef66217dcbd4dffb51c9cb0714a2082` | `52631364eef66217dcbd4dffb51c9cb0714a2082` | Historical report only (5263136); browser push and binding excluded by #11. No merge. |
 
-`origin/HEAD` points to `origin/main`. These are all original local branches and all eight remote branch refs (plus main); the two task branches `integration/issue-12-baseline` and `implement/issue-12-baseline` started at remote main. Reconciliation branches are task artifacts, not unaccounted prior work.
+`origin/HEAD` points to `origin/main`. These are all nine original local branches and all nine remote branch refs; the two task branches `integration/issue-12-baseline` and `implement/issue-12-baseline` started at remote main. Reconciliation branches are task artifacts, not unaccounted prior work.
 
 All course branches share the foundational course line through `093b039`. Glossary pruning branches there; ADR pruning branches at `42593ea`; the wizard, prototype, both research branches and remote terminology change share `979e285`. The application tree is identical across those later branches except the prototype overlay; ADR pruning changes only refund comments, not runtime behavior. No prototype/research runtime code is needed for the accepted baseline.
 
@@ -57,4 +57,8 @@ Checks in the dedicated worktree: `npm run typecheck` passed, then `npm run test
 
 Existing email wording/privacy, transport failure presentation and production token fallback remain known #11 later-slice work. This baseline is not a production-readiness claim. No production data was seeded or changed.
 
-Documentation scope and final main revision are recorded in the completion record after reviewed merges.
+Application PR [#24](https://github.com/rafalvu/cohort-005-project/pull/24) merged at `a25bb33e9f57885ef99cb694af859d24f06d6dac`.
+
+Documentation scope: parallel Spec review reported no findings. Standards review found two inaccurate inherited ADR statements: approval loses Enrollment even with a Claimed Seat, and country resolution ignores the development override. Both statements were corrected to match the preserved implementation. `bash -n` passed for the Wayfinder seed script and wizard template; neither workflow was executed.
+
+The documentation PR and final accepted main revision are recorded in the completion record after reviewed merges.
