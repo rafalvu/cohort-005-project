@@ -338,6 +338,9 @@ export const comments = sqliteTable(
     userId: integer("user_id")
       .notNull()
       .references(() => users.id),
+    // Nullable for historical/seed comments; new browser operations carry both.
+    operationId: text("operation_id"),
+    operationFingerprint: text("operation_fingerprint"),
     // Null for a top-level comment. Replies are one level deep only — a parent
     // must itself be top-level. Enforced on write.
     parentId: integer("parent_id").references(
@@ -357,6 +360,10 @@ export const comments = sqliteTable(
     deletedAt: text("deleted_at"),
   },
   (table) => [
+    uniqueIndex("comments_actor_operation_idx").on(
+      table.userId,
+      table.operationId
+    ),
     index("comments_lesson_idx").on(table.lessonId),
     index("comments_parent_idx").on(table.parentId),
   ]

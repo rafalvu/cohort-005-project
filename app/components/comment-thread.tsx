@@ -58,6 +58,10 @@ function CommentForm({
 }) {
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const [body, setBody] = useState(defaultValue ?? "");
+  const [operationId, setOperationId] = useState("");
+  useEffect(() => {
+    setOperationId(crypto.randomUUID());
+  }, []);
   const submitting = fetcher.state !== "idle";
 
   useEffect(() => {
@@ -69,7 +73,10 @@ function CommentForm({
     }
 
     if (fetcher.data.ok) {
-      if (intent === "create-comment") setBody("");
+      if (intent === "create-comment") {
+        setBody("");
+        setOperationId(crypto.randomUUID());
+      }
       onDone?.();
     }
     // onDone is recreated each render by callers; depending on it would loop.
@@ -82,6 +89,7 @@ function CommentForm({
   return (
     <fetcher.Form method="post" className="space-y-2">
       <input type="hidden" name="intent" value={intent} />
+      <input type="hidden" name="operationId" value={operationId} />
       {parentId !== undefined && (
         <input type="hidden" name="parentId" value={parentId} />
       )}
@@ -100,7 +108,11 @@ function CommentForm({
       />
 
       <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={submitting || empty || tooLong}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={submitting || !operationId || empty || tooLong}
+        >
           {submitting ? "Posting..." : submitLabel}
         </Button>
 
@@ -206,7 +218,8 @@ function CommentItem({
   const [editing, setEditing] = useState(false);
   const [replying, setReplying] = useState(false);
 
-  const isAuthor = currentUserId !== null && comment.author.id === currentUserId;
+  const isAuthor =
+    currentUserId !== null && comment.author.id === currentUserId;
 
   if (comment.deleted) {
     return (
