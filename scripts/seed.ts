@@ -10,6 +10,7 @@ import {
   UserRole,
   CourseStatus,
   LessonProgressStatus,
+  RefundStatus,
   QuestionType,
   TeamMemberRole,
 } from "../app/db/schema";
@@ -190,7 +191,7 @@ async function seed() {
       },
       {
         name: "Liam Thompson",
-        email: "liam.thompson@student.dev",
+        email: "liam@example.com",
         role: UserRole.Student,
         avatarUrl: "https://api.dicebear.com/9.x/avataaars/svg?seed=liam",
         createdAt: daysAgo(30),
@@ -386,7 +387,7 @@ By the end of this course, you'll understand why TypeScript has become the defau
       categoryId: catBySlug["programming"].id,
       status: CourseStatus.Published,
       coverImageUrl: "/images/course-typescript.svg",
-      price: 4999,
+      price: 7900,
       createdAt: daysAgo(355),
       updatedAt: daysAgo(10),
     })
@@ -2229,7 +2230,7 @@ This course is still in draft while the cluster examples are rewritten against t
     .values({
       userId: students[0].id, // Emma — bought course 1 individually
       courseId: course1.id,
-      amountPaid: 4999,
+      amountPaid: 7900,
       country: "US",
       createdAt: daysAgo(50),
     })
@@ -2260,7 +2261,7 @@ This course is still in draft while the cluster examples are rewritten against t
     .values({
       userId: students[2].id, // Olivia — bought course 1 individually
       courseId: course1.id,
-      amountPaid: 4999,
+      amountPaid: 7900,
       country: "US",
       createdAt: daysAgo(35),
     })
@@ -2270,7 +2271,7 @@ This course is still in draft while the cluster examples are rewritten against t
     .values({
       userId: students[4].id, // Sophia — bought course 1 individually
       courseId: course1.id,
-      amountPaid: 4999,
+      amountPaid: 7900,
       country: "US",
       createdAt: daysAgo(15),
     })
@@ -2346,7 +2347,7 @@ This course is still in draft while the cluster examples are rewritten against t
 
   db.update(schema.coupons)
     .set({
-      redeemedByUserId: studentByEmail("liam.thompson@student.dev").id,
+      redeemedByUserId: studentByEmail("liam@example.com").id,
       redeemedAt: daysAgo(25),
     })
     .where(eq(schema.coupons.id, seededCoupons[1].id))
@@ -2714,7 +2715,7 @@ This course is still in draft while the cluster examples are rewritten against t
   );
 
   // Four seats on Design Systems, bought during launch week, none redeemed yet.
-  createTeamPurchase(
+  const novakLicence = createTeamPurchase(
     "marta.novak@student.dev",
     course3,
     4,
@@ -2722,6 +2723,80 @@ This course is still in draft while the cluster examples are rewritten against t
     4,
     []
   );
+
+  // ─── Liam's Refund Request ───
+  // One learner with an Open Refund Request. The dates count back from
+  // today, so the fourteen-day refund window is still open whenever you seed.
+
+  const liam = studentByEmail("liam@example.com");
+  const [liamPurchase] = db
+    .insert(schema.purchases)
+    .values({
+      userId: liam.id,
+      courseId: course1.id,
+      amountPaid: 7900,
+      country: null,
+      createdAt: daysAgo(9),
+    })
+    .returning()
+    .all();
+  db.insert(schema.enrollments)
+    .values({
+      userId: liam.id,
+      courseId: course1.id,
+      enrolledAt: daysAgo(9),
+    })
+    .run();
+  db.insert(schema.lessonProgress)
+    .values([
+      ...course1LessonIds.slice(0, 3).map((lessonId, i) => ({
+        userId: liam.id,
+        lessonId,
+        status: LessonProgressStatus.Completed,
+        completedAt: daysAgo(8 - i),
+      })),
+      {
+        userId: liam.id,
+        lessonId: course1LessonIds[3],
+        status: LessonProgressStatus.InProgress,
+        completedAt: null,
+      },
+    ])
+    .run();
+  db.insert(schema.courseRatings)
+    .values({
+      userId: liam.id,
+      courseId: course1.id,
+      rating: 4,
+      createdAt: daysAgo(6),
+      updatedAt: daysAgo(6),
+    })
+    .run();
+  db.insert(schema.refunds)
+    .values({
+      purchaseId: liamPurchase.id,
+      status: RefundStatus.Open,
+      reason: "Bought the wrong one, I meant the advanced course.",
+      requestedAt: daysAgo(4),
+    })
+    .run();
+
+  console.log("Created Liam's Refund Request.");
+
+  // ─── Marta's Refund Request ───
+  // A Team Licence with no Claimed Seats, so a Platform Admin can approve it.
+  // Its Seats are on hold while the request is open.
+
+  db.insert(schema.refunds)
+    .values({
+      purchaseId: novakLicence.purchase.id,
+      status: RefundStatus.Open,
+      reason: "Our design team was reorganised and nobody needs these seats now.",
+      requestedAt: daysAgo(1),
+    })
+    .run();
+
+  console.log("Created Marta's Refund Request on her Team Licence.");
 
   // ─── Flush watch events ───
   // Batched: the heartbeat makes these by far the largest table, and one
