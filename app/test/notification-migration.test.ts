@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
-import { createTestDb, seedDiscussionData } from "./setup";
+import { createTestDb, seedBaseData } from "./setup";
 import * as schema from "~/db/schema";
 
 it("migrates an existing database without changing domain rows or backfilling Notifications", () => {
@@ -32,7 +32,28 @@ it("migrates an existing database without changing domain rows or backfilling No
   const filename = path.join(dir, "existing.db");
   const previous = createTestDb({ filename, migrationsFolder: oldMigrations });
   try {
-    const { user, course, lesson, question } = seedDiscussionData(previous);
+    const { user, course } = seedBaseData(previous);
+    const module = previous
+      .insert(schema.modules)
+      .values({ courseId: course.id, title: "Basics", position: 1 })
+      .returning()
+      .get();
+    const lesson = previous
+      .insert(schema.lessons)
+      .values({ moduleId: module.id, title: "First lesson", position: 1 })
+      .returning()
+      .get();
+    // Use the historical SQL shape: today's comment model has additional columns.
+    const questionId = previous.$client
+      .prepare(
+        "INSERT INTO comments (lesson_id, user_id, body, created_at) VALUES (?, ?, ?, ?)"
+      )
+      .run(
+        lesson.id,
+        user.id,
+        "Existing question",
+        new Date().toISOString()
+      ).lastInsertRowid;
     const purchase = previous
       .insert(schema.purchases)
       .values({
@@ -64,15 +85,17 @@ it("migrates an existing database without changing domain rows or backfilling No
         positionSeconds: 42,
       })
       .run();
-    previous
-      .insert(schema.comments)
-      .values({
-        userId: user.id,
-        lessonId: lesson.id,
-        parentId: question.id,
-        body: "Existing reply",
-      })
-      .run();
+    previous.$client
+      .prepare(
+        "INSERT INTO comments (lesson_id, user_id, parent_id, body, created_at) VALUES (?, ?, ?, ?, ?)"
+      )
+      .run(
+        lesson.id,
+        user.id,
+        questionId,
+        "Existing reply",
+        new Date().toISOString()
+      );
     previous
       .insert(schema.refunds)
       .values({
@@ -105,7 +128,6 @@ it("migrates an existing database without changing domain rows or backfilling No
       schema.courses,
       schema.modules,
       schema.lessons,
-      schema.comments,
       schema.purchases,
       schema.enrollments,
       schema.lessonProgress,
@@ -115,6 +137,9 @@ it("migrates an existing database without changing domain rows or backfilling No
       schema.teamMembers,
       schema.coupons,
     ];
+    const oldComments = previous.$client
+      .prepare("SELECT * FROM comments")
+      .all();
     const before = tables.map((table) => previous.select().from(table).all());
     previous.$client.close();
     const migrated = createTestDb({ filename });
@@ -122,6 +147,13 @@ it("migrates an existing database without changing domain rows or backfilling No
       expect(
         tables.map((table) => migrated.select().from(table).all())
       ).toEqual(before);
+      expect(
+        migrated.$client
+          .prepare(
+            "SELECT id, lesson_id, user_id, parent_id, body, created_at, edited_at, deleted_at FROM comments"
+          )
+          .all()
+      ).toEqual(oldComments);
       expect(migrated.select().from(schema.notifications).all()).toEqual([]);
       expect(migrated.$client.pragma("foreign_key_check")).toEqual([]);
       expect(migrated.$client.pragma("foreign_keys", { simple: true })).toBe(1);

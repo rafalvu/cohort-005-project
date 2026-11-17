@@ -1,3 +1,4 @@
+import { createDiscussionComment } from "~/lib/discussions.server";
 import { useEffect, useState } from "react";
 import { Link, data, isRouteErrorResponse, useFetcher } from "react-router";
 import { toast } from "sonner";
@@ -12,7 +13,7 @@ import { Textarea } from "~/components/ui/textarea";
 import { UserAvatar } from "~/components/user-avatar";
 import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import { cn, daysSince, formatRelativeTime } from "~/lib/utils";
-import { MIN_COMMENT_LENGTH, MAX_COMMENT_LENGTH } from "~/lib/comments";
+import { MAX_COMMENT_LENGTH } from "~/lib/comments";
 import { parseFormData } from "~/lib/validation";
 import { db } from "~/db";
 import {
@@ -115,51 +116,11 @@ function getCourseForLesson(lessonId: number) {
     .get();
 }
 
-function createComment(
-  userId: number,
-  lessonId: number,
-  parentId: number | null,
-  body: string
-) {
-  const trimmed = body.trim();
-  if (trimmed.length < MIN_COMMENT_LENGTH) {
-    throw new Error("Comment cannot be empty");
-  }
-  if (trimmed.length > MAX_COMMENT_LENGTH) {
-    throw new Error(
-      `Comment must be ${MAX_COMMENT_LENGTH} characters or fewer`
-    );
-  }
-
-  const course = getCourseForLesson(lessonId);
-  if (!course) {
-    throw new Error("Lesson not found");
-  }
-
-  if (parentId !== null) {
-    const parent = getCommentById(parentId);
-    if (!parent) {
-      throw new Error("Parent comment not found");
-    }
-    if (parent.lessonId !== lessonId) {
-      throw new Error("Parent comment belongs to a different lesson");
-    }
-    if (parent.parentId !== null) {
-      throw new Error("Replies can only be one level deep");
-    }
-  }
-
-  return db
-    .insert(comments)
-    .values({ userId, lessonId, parentId, body: trimmed })
-    .returning()
-    .get();
-}
-
 // A question sitting this long without an answer gets called out visually.
 const STALE_AFTER_DAYS = 3;
 
 const replySchema = z.object({
+  operationId: z.string().uuid(),
   intent: z.literal("reply"),
   commentId: z.coerce.number().int(),
   body: z.string(),
@@ -190,7 +151,7 @@ export async function action({ request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, replySchema);
 
   if (!parsed.success) {
-    return { ok: false, error: "Enter a reply before posting." };
+    throw data("Enter a reply before posting.", { status: 400 });
   }
 
   const question = getCommentById(parsed.data.commentId);
@@ -207,19 +168,14 @@ export async function action({ request }: Route.ActionArgs) {
   // instructor, or an admin.
   const access = await requireStaff(request, course.courseId);
 
-  try {
-    createComment(
-      access.userId!,
-      question.lessonId,
-      question.id,
-      parsed.data.body
-    );
-  } catch (error) {
-    if (error instanceof Error) {
-      return { ok: false, error: error.message };
-    }
-    throw error;
-  }
+  if (access.userId === null) throw data("Sign in to reply.", { status: 401 });
+  createDiscussionComment(
+    access.userId,
+    question.lessonId,
+    question.id,
+    parsed.data.body,
+    parsed.data.operationId
+  );
 
   return { ok: true };
 }
@@ -229,6 +185,10 @@ type Question = Awaited<ReturnType<typeof loader>>["questions"][number];
 function QuestionCard({ question }: { question: Question }) {
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const [body, setBody] = useState("");
+  const [operationId, setOperationId] = useState("");
+  useEffect(() => {
+    setOperationId(crypto.randomUUID());
+  }, []);
   const waitingDays = daysSince(question.createdAt);
   const stale = waitingDays >= STALE_AFTER_DAYS;
   const submitting = fetcher.state !== "idle";
@@ -240,6 +200,7 @@ function QuestionCard({ question }: { question: Question }) {
       toast.error(fetcher.data.error);
     } else if (fetcher.data.ok) {
       setBody("");
+      setOperationId(crypto.randomUUID());
       toast.success("Reply posted.");
     }
   }, [fetcher.state, fetcher.data]);
@@ -301,6 +262,7 @@ function QuestionCard({ question }: { question: Question }) {
 
         <fetcher.Form method="post" className="mt-4 space-y-2">
           <input type="hidden" name="intent" value="reply" />
+          <input type="hidden" name="operationId" value={operationId} />
           <input type="hidden" name="commentId" value={question.id} />
 
           <Textarea
@@ -318,6 +280,7 @@ function QuestionCard({ question }: { question: Question }) {
               size="sm"
               disabled={
                 submitting ||
+                !operationId ||
                 body.trim().length === 0 ||
                 body.length > MAX_COMMENT_LENGTH
               }
