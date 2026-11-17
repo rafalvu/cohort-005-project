@@ -16,6 +16,7 @@ import {
   LessonProgressStatus,
   RefundStatus,
 } from "~/db/schema";
+import type { Email } from "~/lib/mailer.server";
 import { formatPrice } from "~/lib/utils";
 import {
   REFUND_COMPLETION_LIMIT,
@@ -348,7 +349,7 @@ export function getRefundOffer(
   };
 }
 
-export type Email = { to: string; subject: string; body: string };
+export type { Email } from "~/lib/mailer.server";
 
 export type RaiseResult =
   | { ok: true; refundRequestId: number; kind: PurchaseKind; email: Email }

@@ -6,7 +6,7 @@ import type { Route } from "./+types/redeem.$code";
 import { getCurrentUserId } from "~/lib/session";
 import { resolveCountry } from "~/lib/country.server";
 import { parseParams, parseFormData } from "~/lib/validation";
-import { getSeatAvailability } from "~/lib/refunds.server";
+import { getSeatAvailability, type SeatAvailability } from "~/lib/refunds.server";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Ticket, AlertCircle, CheckCircle2, Globe } from "lucide-react";
@@ -40,6 +40,12 @@ const SEAT_ON_HOLD =
 const SEAT_REFUNDED =
   "This seat is no longer available. Ask the person who shared it with you.";
 
+function seatUnavailableReason(availability: SeatAvailability) {
+  if (availability === "on_hold") return SEAT_ON_HOLD;
+  if (availability === "refunded") return SEAT_REFUNDED;
+  return null;
+}
+
 type RedeemResult =
   | { ok: true; enrollment: typeof enrollments.$inferSelect }
   | { ok: false; error: string };
@@ -59,11 +65,9 @@ function redeemCoupon(
   }
 
   const availability = getSeatAvailability(db, coupon);
-  if (availability === "on_hold") {
-    return { ok: false, error: SEAT_ON_HOLD };
-  }
-  if (availability === "refunded") {
-    return { ok: false, error: SEAT_REFUNDED };
+  const unavailableReason = seatUnavailableReason(availability);
+  if (unavailableReason) {
+    return { ok: false, error: unavailableReason };
   }
 
   const existingEnrollment = db
@@ -151,12 +155,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   const alreadyRedeemed = coupon.redeemedByUserId !== null;
   const alreadyEnrolled = isUserEnrolled(currentUserId, coupon.courseId);
   const availability = getSeatAvailability(db, coupon);
-  const unavailableReason =
-    availability === "on_hold"
-      ? SEAT_ON_HOLD
-      : availability === "refunded"
-        ? SEAT_REFUNDED
-        : null;
+  const unavailableReason = seatUnavailableReason(availability);
 
   // Check country mismatch upfront so we can show a clear message
   let countryMismatch = false;

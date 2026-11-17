@@ -98,8 +98,8 @@ export async function action({ request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, adminRefundActionSchema);
 
   if (!parsed.success) {
-    return data(
-      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
+    throw data(
+      Object.values(parsed.errors)[0] ?? "Invalid input.",
       { status: 400 }
     );
   }
@@ -124,7 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
         );
 
   if (!result.ok) {
-    return data({ error: result.error }, { status: result.status });
+    throw data(result.error, { status: result.status });
   }
 
   await sendEmail(result.email);
@@ -264,20 +264,14 @@ function RefundRequestCard({
 }: {
   refundRequest: RefundRequestForReview;
 }) {
-  const fetcher = useFetcher<
-    { success: true; message: string } | { error: string }
-  >();
+  const fetcher = useFetcher<typeof action>();
   const [note, setNote] = useState("");
   const isSubmitting = fetcher.state !== "idle";
   const isOpen = refundRequest.status === RefundStatus.Open;
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
-    if ("error" in fetcher.data) {
-      toast.error(fetcher.data.error);
-    } else {
-      toast.success(fetcher.data.message);
-    }
+    toast.success(fetcher.data.message);
   }, [fetcher.state, fetcher.data]);
 
   function decide(intent: "approve" | "decline") {
