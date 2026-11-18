@@ -12,38 +12,33 @@ import {
   UserRole,
   RefundStatus,
   coupons,
-  teamMembers,
-  TeamMemberRole,
 } from "~/db/schema";
 import { listRefundRequestsForReview } from "~/lib/refunds.server";
+import { persistentNotificationAccess } from "~/lib/notification-access.server";
 import { getAccess } from "~/lib/access.server";
 
 export async function resolveNotification(
   request: Request,
   row: typeof notifications.$inferSelect
 ) {
+  const eligible = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(and(eq(notifications.id, row.id), persistentNotificationAccess))
+    .get();
+  if (!eligible) return null;
+
   if (
     row.kind === "seat_claimed" &&
     row.teamId !== null &&
     row.seatId !== null
   ) {
-    const membership = db
-      .select()
-      .from(teamMembers)
-      .where(
-        and(
-          eq(teamMembers.teamId, row.teamId),
-          eq(teamMembers.userId, row.recipientId),
-          eq(teamMembers.role, TeamMemberRole.Admin)
-        )
-      )
-      .get();
     const seat = db
       .select()
       .from(coupons)
-      .where(and(eq(coupons.id, row.seatId), eq(coupons.teamId, row.teamId)))
+      .where(eq(coupons.id, row.seatId))
       .get();
-    if (!membership || !seat || !seat.redeemedAt) return null;
+    if (!seat) return null;
     return {
       type: "team" as const,
       teamId: row.teamId,
@@ -56,12 +51,7 @@ export async function resolveNotification(
     const refundRequest = db
       .select()
       .from(refunds)
-      .where(
-        and(
-          eq(refunds.id, row.refundRequestId),
-          eq(refunds.purchaseId, row.purchaseId)
-        )
-      )
+      .where(eq(refunds.id, row.refundRequestId))
       .get();
     const purchase = db
       .select()
@@ -70,12 +60,6 @@ export async function resolveNotification(
       .get();
     if (!refundRequest || !purchase) return null;
     if (row.kind === "refund_requested") {
-      const user = db
-        .select()
-        .from(users)
-        .where(eq(users.id, row.recipientId))
-        .get();
-      if (user?.role !== UserRole.Admin) return null;
       const review = listRefundRequestsForReview(
         db,
         refundRequest.status,
@@ -91,7 +75,6 @@ export async function resolveNotification(
         href: `/admin/refunds?refundRequestId=${refundRequest.id}`,
       };
     }
-    if (purchase.userId !== row.recipientId) return null;
     return {
       type: "purchase" as const,
       purchaseId: purchase.id,
@@ -110,37 +93,18 @@ export async function resolveNotification(
   const question = db
     .select()
     .from(comments)
-    .where(
-      and(eq(comments.id, row.questionId), eq(comments.lessonId, row.lessonId))
-    )
+    .where(eq(comments.id, row.questionId))
     .get();
   const lesson = db
     .select()
     .from(lessons)
     .where(eq(lessons.id, row.lessonId))
     .get();
-  if (
-    !question ||
-    (row.kind === "question_created" && question.deletedAt) ||
-    question.parentId !== null ||
-    !lesson
-  )
-    return null;
+  if (!question || !lesson) return null;
   const reply =
     row.replyId === null
       ? null
-      : db
-          .select()
-          .from(comments)
-          .where(
-            and(
-              eq(comments.id, row.replyId),
-              eq(comments.parentId, question.id),
-              eq(comments.lessonId, lesson.id)
-            )
-          )
-          .get();
-  if (row.kind === "reply_created" && (!reply || reply.deletedAt)) return null;
+      : db.select().from(comments).where(eq(comments.id, row.replyId)).get();
   const module = db
     .select()
     .from(modules)
@@ -152,8 +116,10 @@ export async function resolveNotification(
     .from(courses)
     .where(eq(courses.id, module.courseId))
     .get();
-  if (!course || !(await getAccess(request, course.id)).canViewContent)
-    return null;
+  if (!course) return null;
+  // Persistent eligibility is shared with cleanup; travel only hides history.
+  const access = await getAccess(request, course.id);
+  if (access.userId !== row.recipientId || access.pppBlocked) return null;
   const staffReply = db
     .select({ id: comments.id })
     .from(comments)

@@ -16,7 +16,9 @@ for surviving replies. Existing Notification foreign-key cascades handle physica
 source deletion, including lessons, comments, Purchases, Refund Requests, Seats,
 teams, and recipients. These operations never delete domain data as cleanup.
 
-The persistent authorization predicate deliberately excludes request country/PPP.
+Cleanup and read resolution use the same persistent authorization predicate in
+`notification-access.server.ts`. Detail resolution retains its typed source queries.
+The shared predicate deliberately excludes request country/PPP.
 A temporary country restriction hides history in all read interfaces but does not
 erase it. Restoring access cannot reconstruct already deleted Notifications;
 cleanup contains no producer or backfill behavior.
