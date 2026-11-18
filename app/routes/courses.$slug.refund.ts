@@ -48,9 +48,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, refundActionSchema);
 
   if (!parsed.success) {
-    throw data(Object.values(parsed.errors)[0] ?? "Invalid input.", {
-      status: 400,
-    });
+    return data({ errors: parsed.errors }, { status: 400 });
   }
 
   const purchase = db

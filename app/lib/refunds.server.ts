@@ -750,19 +750,14 @@ export function approveRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
-    if (process.env.CADENCE_NOTIFICATIONS_ENABLED === "true") {
-      createNotifications(
-        tx,
-        {
-          sourceEventKey: `refund-decision:${refundRequestId}`,
-          kind: "refund_approved",
-          refundRequestId,
-          purchaseId: purchase.id,
-        },
-        purchase.userId === platformAdminId ? [] : [purchase.userId],
-        now
-      );
-    }
+    createDecisionNotification(
+      tx,
+      refundRequestId,
+      purchase,
+      platformAdminId,
+      "refund_approved",
+      now
+    );
 
     return {
       ok: true,
@@ -807,21 +802,14 @@ export function declineRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
-    if (process.env.CADENCE_NOTIFICATIONS_ENABLED === "true") {
-      createNotifications(
-        tx,
-        {
-          sourceEventKey: `refund-decision:${refundRequestId}`,
-          kind: "refund_declined",
-          refundRequestId,
-          purchaseId: found.purchase.id,
-        },
-        found.purchase.userId === platformAdminId
-          ? []
-          : [found.purchase.userId],
-        now
-      );
-    }
+    createDecisionNotification(
+      tx,
+      refundRequestId,
+      found.purchase,
+      platformAdminId,
+      "refund_declined",
+      now
+    );
 
     return {
       ok: true,
@@ -833,6 +821,29 @@ export function declineRefundRequest(
       ),
     };
   });
+}
+
+function createDecisionNotification(
+  tx: Tx,
+  refundRequestId: number,
+  purchase: Purchase,
+  platformAdminId: number,
+  kind: "refund_approved" | "refund_declined",
+  now: Date
+) {
+  if (process.env.CADENCE_NOTIFICATIONS_ENABLED !== "true") return;
+
+  createNotifications(
+    tx,
+    {
+      sourceEventKey: `refund-decision:${refundRequestId}`,
+      kind,
+      refundRequestId,
+      purchaseId: purchase.id,
+    },
+    purchase.userId === platformAdminId ? [] : [purchase.userId],
+    now
+  );
 }
 
 /** The email the buyer gets once their Refund Request is decided. */
