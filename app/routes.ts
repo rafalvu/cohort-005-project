@@ -50,6 +50,8 @@ export default [
   ]),
   route("signup", "routes/signup.tsx"),
   route("login", "routes/login.tsx"),
+  route("api/notifications", "routes/api.notifications.ts"),
+  route("api/purchases/:purchaseId", "routes/api.purchases.$purchaseId.ts"),
   route("api/switch-user", "routes/api.switch-user.ts"),
   route("api/logout", "routes/api.logout.ts"),
   route("api/video-tracking", "routes/api.video-tracking.ts"),

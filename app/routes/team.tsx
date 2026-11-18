@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { useEffect, useState } from "react";
 import { Link, useFetcher } from "react-router";
 import { toast } from "sonner";
@@ -26,14 +27,15 @@ import {
 } from "~/lib/refunds.server";
 import { formatPrice } from "~/lib/utils";
 
-function getTeamForAdmin(userId: number) {
+function getTeamForAdmin(userId: number, teamId?: number) {
   const membership = db
     .select()
     .from(teamMembers)
     .where(
       and(
         eq(teamMembers.userId, userId),
-        eq(teamMembers.role, TeamMemberRole.Admin)
+        eq(teamMembers.role, TeamMemberRole.Admin),
+        teamId === undefined ? undefined : eq(teamMembers.teamId, teamId)
       )
     )
     .get();
@@ -87,7 +89,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     throw data("Select a user from the DevUI panel.", { status: 401 });
   }
 
-  const team = getTeamForAdmin(currentUserId);
+  const parsedTeamId = z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .safeParse(new URL(request.url).searchParams.get("teamId") ?? undefined);
+  if (!parsedTeamId.success) throw data("Unavailable", { status: 404 });
+  const team = getTeamForAdmin(currentUserId, parsedTeamId.data);
+  if (!team && parsedTeamId.data !== undefined)
+    throw data("Unavailable", { status: 404 });
 
   if (!team) {
     throw data("You don't have a team. Purchase team seats to create one.", {
