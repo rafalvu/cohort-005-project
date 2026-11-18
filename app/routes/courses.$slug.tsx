@@ -45,10 +45,7 @@ import { data, isRouteErrorResponse } from "react-router";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { renderMarkdown } from "~/lib/markdown.server";
 import { resolveCountry } from "~/lib/country.server";
-import {
-  calculatePppPrice,
-  getCountryTierInfo,
-} from "~/lib/ppp";
+import { calculatePppPrice, getCountryTierInfo } from "~/lib/ppp";
 import { parseFormData } from "~/lib/validation";
 import { MAX_RATING, MIN_RATING } from "~/lib/ratings";
 import { StarRating, StarRatingInput } from "~/components/star-rating";
@@ -302,7 +299,10 @@ function findRating(userId: number, courseId: number) {
     .select()
     .from(courseRatings)
     .where(
-      and(eq(courseRatings.userId, userId), eq(courseRatings.courseId, courseId))
+      and(
+        eq(courseRatings.userId, userId),
+        eq(courseRatings.courseId, courseId)
+      )
     )
     .get();
 }
@@ -785,6 +785,9 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
                     <RequestRefund
                       slug={course.slug}
                       purchaseId={refundOffer.purchaseId}
+                      previousRefundRequestId={
+                        refundOffer.previousRefundRequestId
+                      }
                       amount={refundOffer.amount}
                     />
                   )}
@@ -862,10 +865,12 @@ function RateCourse({ userRating }: { userRating: number | null }) {
 function RequestRefund({
   slug,
   purchaseId,
+  previousRefundRequestId,
   amount,
 }: {
   slug: string;
   purchaseId: number;
+  previousRefundRequestId: number;
   amount: number;
 }) {
   const fetcher = useFetcher<{ errors?: Record<string, string> }>();
@@ -907,6 +912,11 @@ function RequestRefund({
         className="space-y-2"
       >
         <input type="hidden" name="purchaseId" value={purchaseId} />
+        <input
+          type="hidden"
+          name="previousRefundRequestId"
+          value={previousRefundRequestId}
+        />
         <Textarea
           name="reason"
           rows={3}

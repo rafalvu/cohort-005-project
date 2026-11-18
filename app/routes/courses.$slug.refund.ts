@@ -18,6 +18,7 @@ const refundActionSchema = z.object({
   // their Individual Purchase from the course page, or a Team Licence from
   // the team page.
   purchaseId: z.coerce.number().int(),
+  previousRefundRequestId: z.coerce.number().int().nonnegative(),
   reason: z
     .string()
     .trim()
@@ -65,7 +66,8 @@ export async function action({ params, request }: Route.ActionArgs) {
     purchase.id,
     currentUserId,
     parsed.data.reason,
-    new Date()
+    new Date(),
+    parsed.data.previousRefundRequestId
   );
 
   if (!result.ok) {

@@ -1,4 +1,13 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { alias } from "drizzle-orm/sqlite-core";
 import * as schema from "~/db/schema";
@@ -15,7 +24,9 @@ import {
   videoWatchEvents,
   LessonProgressStatus,
   RefundStatus,
+  UserRole,
 } from "~/db/schema";
+import { createNotifications } from "~/lib/notifications.server";
 import type { Email } from "~/lib/mailer.server";
 import { formatPrice } from "~/lib/utils";
 import {
@@ -216,8 +227,7 @@ function getRefundFigures(db: Queryable, purchase: Purchase): RefundFigures {
 /** What the buyer is told when they can't raise a Refund Request. */
 const RULE_BREAK_ERRORS: Record<RuleBreak, string> = {
   window_closed: `The ${REFUND_WINDOW_DAYS}-day window has closed.`,
-  watched_too_much:
-    "You have watched too much of this course to get a refund.",
+  watched_too_much: "You have watched too much of this course to get a refund.",
   completed_too_much:
     "You have completed too much of this course to request a refund.",
   seat_claimed: "A Team Licence with a claimed Seat cannot be refunded.",
@@ -260,7 +270,11 @@ function findRuleBreaks(
 
 // ─── Raising a Refund Request ───
 
-export type Failure = { ok: false; status: 400 | 403 | 404 | 409; error: string };
+export type Failure = {
+  ok: false;
+  status: 400 | 403 | 404 | 409;
+  error: string;
+};
 
 type RefundCheck = { ok: true; purchase: Purchase } | Failure;
 
@@ -309,7 +323,19 @@ export function checkRefundRequest(
   return { ok: true, purchase };
 }
 
+function latestRefundRequestId(db: Queryable, purchaseId: number) {
+  return (
+    db
+      .select({ id: refunds.id })
+      .from(refunds)
+      .where(eq(refunds.purchaseId, purchaseId))
+      .orderBy(desc(refunds.id))
+      .get()?.id ?? 0
+  );
+}
+
 export type RefundOffer = {
+  previousRefundRequestId: number;
   purchaseId: number;
   amount: number;
   lastDayInWindow: string;
@@ -343,6 +369,7 @@ export function getRefundOffer(
   if (!check.ok) return null;
 
   return {
+    previousRefundRequestId: latestRefundRequestId(db, individualPurchase.id),
     purchaseId: individualPurchase.id,
     amount: individualPurchase.amountPaid,
     lastDayInWindow: lastDayOfWindow(individualPurchase.createdAt),
@@ -360,53 +387,89 @@ export function raiseRefundRequest(
   purchaseId: number,
   buyerId: number,
   reason: string,
-  now: Date
+  now: Date,
+  previousRefundRequestId?: number
 ): RaiseResult {
-  const check = checkRefundRequest(db, purchaseId, buyerId, now);
-  if (!check.ok) return check;
+  return db.transaction((tx): RaiseResult => {
+    const check = checkRefundRequest(tx, purchaseId, buyerId, now);
+    if (!check.ok) return check;
+    // A rendered offer identifies the preceding request (zero for the first).
+    // Replaying that offer after a decline must not create a new request.
+    if (
+      previousRefundRequestId !== undefined &&
+      latestRefundRequestId(tx, purchaseId) !== previousRefundRequestId
+    ) {
+      return {
+        ok: false,
+        status: 409,
+        error:
+          "This refund offer has changed. Refresh before requesting again.",
+      };
+    }
 
-  const { purchase } = check;
-  const buyer = db.select().from(users).where(eq(users.id, buyerId)).get();
-  const course = db
-    .select()
-    .from(courses)
-    .where(eq(courses.id, purchase.courseId))
-    .get();
+    const { purchase } = check;
+    const buyer = tx.select().from(users).where(eq(users.id, buyerId)).get();
+    const course = tx
+      .select()
+      .from(courses)
+      .where(eq(courses.id, purchase.courseId))
+      .get();
 
-  if (!buyer || !course) {
-    return { ok: false, status: 404, error: "Purchase not found." };
-  }
+    if (!buyer || !course) {
+      return { ok: false, status: 404, error: "Purchase not found." };
+    }
 
-  const refundRequest = db
-    .insert(refunds)
-    .values({
-      purchaseId: purchase.id,
-      status: RefundStatus.Open,
-      reason,
-      requestedAt: now.toISOString(),
-    })
-    .returning()
-    .get();
+    const refundRequest = tx
+      .insert(refunds)
+      .values({
+        purchaseId: purchase.id,
+        status: RefundStatus.Open,
+        reason,
+        requestedAt: now.toISOString(),
+      })
+      .returning()
+      .get();
 
-  return {
-    ok: true,
-    refundRequestId: refundRequest.id,
-    kind: kindOf(getSeats(db, purchase.id)),
-    email: {
-      to: buyer.email,
-      subject: `Refund requested — ${course.title}`,
-      body: [
-        `Hi ${buyer.name},`,
-        "",
-        `We have your refund request for "${course.title}".`,
-        `The refund is for ${formatPrice(purchase.amountPaid)}, the amount you paid.`,
-        "",
-        "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
-        "",
-        "— The Cadence team",
-      ].join("\n"),
-    },
-  };
+    if (process.env.CADENCE_NOTIFICATIONS_ENABLED === "true") {
+      const recipients = tx
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.role, UserRole.Admin))
+        .all()
+        .map((u) => u.id)
+        .filter((id) => id !== buyerId);
+      createNotifications(
+        tx,
+        {
+          sourceEventKey: `refund-request:${refundRequest.id}`,
+          kind: "refund_requested",
+          refundRequestId: refundRequest.id,
+          purchaseId: purchase.id,
+        },
+        recipients,
+        now
+      );
+    }
+    return {
+      ok: true,
+      refundRequestId: refundRequest.id,
+      kind: kindOf(getSeats(tx, purchase.id)),
+      email: {
+        to: buyer.email,
+        subject: `Refund requested — ${course.title}`,
+        body: [
+          `Hi ${buyer.name},`,
+          "",
+          `We have your refund request for "${course.title}".`,
+          `The refund is for ${formatPrice(purchase.amountPaid)}, the amount you paid.`,
+          "",
+          "Our team reviews every refund request by hand. You do not need to do anything else — we will email you again when it is done.",
+          "",
+          "— The Cadence team",
+        ].join("\n"),
+      },
+    };
+  });
 }
 
 // ─── Listing Refund Requests ───
@@ -501,7 +564,8 @@ export function listRefundRequestsForReview(
       // A Claimed Seat belongs to another student, so the only way out of
       // that request is a decline. See docs/adr/0003.
       canApprove:
-        row.status === RefundStatus.Open && !ruleBreaks.includes("seat_claimed"),
+        row.status === RefundStatus.Open &&
+        !ruleBreaks.includes("seat_claimed"),
     };
   });
 }
@@ -544,7 +608,11 @@ export function listTeamLicences(db: Queryable, buyerId: number, now: Date) {
     if (kindOf(seats) !== "team_licence") return [];
 
     const latestRefundRequest = db
-      .select({ status: refunds.status, decisionNote: refunds.decisionNote })
+      .select({
+        id: refunds.id,
+        status: refunds.status,
+        decisionNote: refunds.decisionNote,
+      })
       .from(refunds)
       .where(eq(refunds.purchaseId, purchase.id))
       .orderBy(desc(refunds.requestedAt), desc(refunds.id))
@@ -682,6 +750,15 @@ export function approveRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    createDecisionNotification(
+      tx,
+      refundRequestId,
+      purchase,
+      platformAdminId,
+      "refund_approved",
+      now
+    );
+
     return {
       ok: true,
       email: buildDecisionEmail(tx, purchase, RefundStatus.Approved, note),
@@ -725,6 +802,15 @@ export function declineRefundRequest(
       .where(eq(refunds.id, refundRequestId))
       .run();
 
+    createDecisionNotification(
+      tx,
+      refundRequestId,
+      found.purchase,
+      platformAdminId,
+      "refund_declined",
+      now
+    );
+
     return {
       ok: true,
       email: buildDecisionEmail(
@@ -735,6 +821,29 @@ export function declineRefundRequest(
       ),
     };
   });
+}
+
+function createDecisionNotification(
+  tx: Tx,
+  refundRequestId: number,
+  purchase: Purchase,
+  platformAdminId: number,
+  kind: "refund_approved" | "refund_declined",
+  now: Date
+) {
+  if (process.env.CADENCE_NOTIFICATIONS_ENABLED !== "true") return;
+
+  createNotifications(
+    tx,
+    {
+      sourceEventKey: `refund-decision:${refundRequestId}`,
+      kind,
+      refundRequestId,
+      purchaseId: purchase.id,
+    },
+    purchase.userId === platformAdminId ? [] : [purchase.userId],
+    now
+  );
 }
 
 /** The email the buyer gets once their Refund Request is decided. */
