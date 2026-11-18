@@ -170,9 +170,14 @@ export async function loader({ request }: Route.LoaderArgs) {
     };
   });
 
-  const teamLicences = listTeamLicences(db, currentUserId, new Date());
+  const teamPurchaseIds = new Set(allCoupons.map((seat) => seat.purchaseId));
+  const teamLicences = listTeamLicences(db, currentUserId, new Date()).filter(
+    (licence) => teamPurchaseIds.has(licence.purchaseId)
+  );
+  // Checkout currently assigns seats to the first administered team.
+  const canBuyMoreSeats = getTeamForAdmin(currentUserId)?.id === team.id;
 
-  return { courseStats, couponRows, teamLicences };
+  return { courseStats, couponRows, teamLicences, canBuyMoreSeats };
 }
 
 function CopyButton({ code }: { code: string }) {
@@ -208,7 +213,7 @@ function CopyButton({ code }: { code: string }) {
 }
 
 export default function Team({ loaderData }: Route.ComponentProps) {
-  const { courseStats, couponRows, teamLicences } = loaderData;
+  const { courseStats, couponRows, teamLicences, canBuyMoreSeats } = loaderData;
   const [courseFilter, setCourseFilter] = useState<number | "all">("all");
 
   const filteredCoupons =
@@ -258,11 +263,13 @@ export default function Team({ loaderData }: Route.ComponentProps) {
                       seats claimed
                     </p>
                   </div>
-                  <Link to={`/courses/${stat.courseSlug}/purchase?mode=team`}>
-                    <Button variant="outline" size="sm">
-                      Buy more seats
-                    </Button>
-                  </Link>
+                  {canBuyMoreSeats && (
+                    <Link to={`/courses/${stat.courseSlug}/purchase?mode=team`}>
+                      <Button variant="outline" size="sm">
+                        Buy more seats
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               </CardContent>
             </Card>

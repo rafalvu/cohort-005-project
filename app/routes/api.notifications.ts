@@ -154,17 +154,27 @@ export async function action({ request }: LoaderFunctionArgs) {
     }
     return { success: true };
   }
-  const url = new URL(request.url);
-  url.search = new URLSearchParams({ id: String(parsed.data.id) }).toString();
-  const result = await loader({
-    request: new Request(url, { headers: request.headers }),
-  } as LoaderFunctionArgs);
-  if (!result.item) throw data("Unavailable", { status: 404 });
-  db.update(notifications)
-    .set({ readAt: result.item.readAt ?? new Date().toISOString() })
+  const row = db
+    .select()
+    .from(notifications)
     .where(
       and(
-        eq(notifications.id, result.item.id),
+        eq(notifications.id, parsed.data.id),
+        eq(notifications.recipientId, recipientId),
+        gt(
+          notifications.createdAt,
+          new Date(Date.now() - 90 * 86400000).toISOString()
+        )
+      )
+    )
+    .get();
+  if (!row || !(await resolveNotification(request, row)))
+    throw data("Unavailable", { status: 404 });
+  db.update(notifications)
+    .set({ readAt: row.readAt ?? new Date().toISOString() })
+    .where(
+      and(
+        eq(notifications.id, row.id),
         eq(notifications.recipientId, recipientId),
         isNull(notifications.readAt)
       )

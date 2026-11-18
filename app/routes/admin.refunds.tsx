@@ -88,14 +88,15 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     .optional()
     .safeParse(url.searchParams.get("refundRequestId") ?? undefined);
   if (!selected.success) throw data("Unavailable", { status: 404 });
-  const refund =
+  const refundRequest =
     selected.data === undefined
       ? undefined
       : db.select().from(refunds).where(eq(refunds.id, selected.data)).get();
-  if (selected.data !== undefined && !refund)
+  if (selected.data !== undefined && !refundRequest)
     throw data("Unavailable", { status: 404 });
   const status =
-    refund?.status ?? refundFilterSchema.parse(url.searchParams.get("status"));
+    refundRequest?.status ??
+    refundFilterSchema.parse(url.searchParams.get("status"));
 
   return {
     status,

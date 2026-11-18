@@ -409,6 +409,24 @@ test("Seat history targets the exact team among multiple memberships and rejects
     })
     .returning()
     .get();
+  const otherPurchase = database()
+    .insert(purchases)
+    .values({
+      userId: fixture.user.id,
+      courseId: fixture.course.id,
+      amountPaid: 2000,
+    })
+    .returning()
+    .get();
+  database()
+    .insert(coupons)
+    .values({
+      teamId: first.id,
+      courseId: fixture.course.id,
+      purchaseId: otherPurchase.id,
+      code: "OTHER-TEAM-SEAT",
+    })
+    .run();
   createNotifications(
     database(),
     {
@@ -441,9 +459,19 @@ test("Seat history targets the exact team among multiple memberships and rejects
         headers: { Cookie: cookie },
       }),
     } as Parameters<typeof teamLoader>[0]);
-  expect(await destination(second.id)).toMatchObject({
+  const selectedTeam = await destination(second.id);
+  expect(selectedTeam).toMatchObject({
     couponRows: [{ id: seat.id }],
+    canBuyMoreSeats: false,
   });
+  expect(
+    selectedTeam.teamLicences.map((licence) => licence.purchaseId)
+  ).toEqual([purchase.id]);
+  const defaultTeam = await destination(first.id);
+  expect(defaultTeam.canBuyMoreSeats).toBe(true);
+  expect(defaultTeam.teamLicences.map((licence) => licence.purchaseId)).toEqual(
+    [otherPurchase.id]
+  );
   await expect(destination(999)).rejects.toMatchObject({
     data: "Unavailable",
     init: { status: 404 },

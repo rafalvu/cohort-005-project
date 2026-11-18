@@ -53,7 +53,7 @@ export async function resolveNotification(
     };
   }
   if (row.refundRequestId !== null && row.purchaseId !== null) {
-    const refund = db
+    const refundRequest = db
       .select()
       .from(refunds)
       .where(
@@ -68,7 +68,7 @@ export async function resolveNotification(
       .from(purchases)
       .where(eq(purchases.id, row.purchaseId))
       .get();
-    if (!refund || !purchase) return null;
+    if (!refundRequest || !purchase) return null;
     if (row.kind === "refund_requested") {
       const user = db
         .select()
@@ -78,27 +78,27 @@ export async function resolveNotification(
       if (user?.role !== UserRole.Admin) return null;
       const review = listRefundRequestsForReview(
         db,
-        refund.status,
+        refundRequest.status,
         new Date()
-      ).find((item) => item.id === refund.id);
+      ).find((item) => item.id === refundRequest.id);
       return {
         type: "refund-request" as const,
-        refundRequestId: refund.id,
+        refundRequestId: refundRequest.id,
         purchaseId: purchase.id,
-        status: refund.status,
-        canDecide: refund.status === RefundStatus.Open,
+        status: refundRequest.status,
+        canDecide: refundRequest.status === RefundStatus.Open,
         canApprove: review?.canApprove ?? false,
-        href: `/admin/refunds?refundRequestId=${refund.id}`,
+        href: `/admin/refunds?refundRequestId=${refundRequest.id}`,
       };
     }
     if (purchase.userId !== row.recipientId) return null;
     return {
       type: "purchase" as const,
       purchaseId: purchase.id,
-      refundRequestId: refund.id,
-      status: refund.status,
-      decisionNote: refund.decisionNote,
-      href: `/api/purchases/${purchase.id}?refundRequestId=${refund.id}`,
+      refundRequestId: refundRequest.id,
+      status: refundRequest.status,
+      decisionNote: refundRequest.decisionNote,
+      href: `/api/purchases/${purchase.id}?refundRequestId=${refundRequest.id}`,
     };
   }
   if (

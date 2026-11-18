@@ -20,7 +20,7 @@ Targets carry live domain state and exact destinations:
 - Discussion: lesson URL with `questionId`, selecting one authorized thread. State distinguishes answered, unanswered and deleted questions.
 - Refund Request: `/admin/refunds?refundRequestId=…`, selecting that request's current status even after another Platform Admin decides it. Existing stale-decision guards remain authoritative; reading does not decide it.
 - Buyer outcome: `/api/purchases/:purchaseId?refundRequestId=…`, a buyer-only JSON resource returning the exact Purchase and Refund Request for the later detail UI. Enrollment loss does not invalidate ownership.
-- Seat: `/team?teamId=…`, selecting that team's Seat list rather than the first membership.
+- Seat: `/team?teamId=…`, selecting that team's Seat list and buyer-owned Team Licences rather than the first membership. Buy more seats is available only for the team current checkout can target (the first administered team).
 
 Invalid, missing or unauthorized detail targets return generic `Unavailable` responses. Independent destination navigation never mutates Notification reads.
 
