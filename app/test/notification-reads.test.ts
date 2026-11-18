@@ -34,9 +34,14 @@ vi.mock("~/lib/mailer.server", async (original) => {
       actual.sendEmail(email, { async send() {} }),
   };
 });
+import { loader as appLoader } from "~/routes/layout.app";
+import { action as changeUser } from "~/routes/admin.users";
 import { loader as teamLoader } from "~/routes/team";
 import { loader as purchaseLoader } from "~/routes/api.purchases.$purchaseId";
-import { loader as lessonLoader } from "~/routes/courses.$slug.lessons.$lessonId";
+import {
+  action as lessonAction,
+  loader as lessonLoader,
+} from "~/routes/courses.$slug.lessons.$lessonId";
 import {
   action as decide,
   loader as reviewLoader,
@@ -318,6 +323,7 @@ test("another Platform Admin's decision updates current task status without read
     .values({ purchaseId: purchase.id, reason: "Please refund this Purchase" })
     .returning()
     .get();
+  notify("before-refund");
   const task = createNotifications(
     database(),
     {
@@ -356,6 +362,13 @@ test("another Platform Admin's decision updates current task status without read
     item: { readAt: null, target: { status: "approved", canDecide: false } },
   });
   expect(database().select().from(enrollments).all()).toEqual([]);
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .all()
+      .some((row) => row.sourceEventKey === "before-refund")
+  ).toBe(false);
   expect(await view()).toMatchObject({
     items: [
       {
@@ -482,6 +495,16 @@ test("Seat history targets the exact team among multiple memberships and rejects
     data: "Unavailable",
     init: { status: 404 },
   });
+  expect(database().select().from(notifications).all()).toEqual([]);
+  database()
+    .insert(teamMembers)
+    .values({
+      teamId: second.id,
+      userId: fixture.user.id,
+      role: TeamMemberRole.Admin,
+    })
+    .run();
+  expect(await view()).toMatchObject({ items: [], unreadCount: 0 });
 });
 test("exact refund destinations reauthorize and preserve unread state after the task changes", async () => {
   const purchase = database()
@@ -631,4 +654,303 @@ test("malformed detail targets are generically unavailable and activation remain
     data: "Unavailable",
     init: { status: 404 },
   });
+});
+
+test("role loss proactively removes inaccessible history before restoration while preserving Enrollment and ownership access", async () => {
+  const admin = database()
+    .insert(users)
+    .values({ name: "Admin", email: "admin@example.com", role: UserRole.Admin })
+    .returning()
+    .get();
+  const recipient = database()
+    .insert(users)
+    .values({
+      name: "Recipient",
+      email: "recipient@example.com",
+      role: UserRole.Admin,
+    })
+    .returning()
+    .get();
+  notify("lost", recipient.id);
+  notify("enrolled");
+  notify("owned", fixture.instructor.id);
+  for (const id of [recipient.id, fixture.user.id, fixture.instructor.id]) {
+    await changeUser({
+      request: await request("", admin.id, {
+        intent: "update-role",
+        userId: String(id),
+        role: UserRole.Student,
+      }),
+    } as Parameters<typeof changeUser>[0]);
+  }
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .all()
+      .map((row) => row.sourceEventKey)
+      .sort()
+  ).toEqual(["enrolled", "owned"]);
+  await changeUser({
+    request: await request("", admin.id, {
+      intent: "update-role",
+      userId: String(recipient.id),
+      role: UserRole.Admin,
+    }),
+  } as Parameters<typeof changeUser>[0]);
+  expect(await view("", recipient.id)).toMatchObject({
+    items: [],
+    unreadCount: 0,
+  });
+  expect(await view()).toMatchObject({ unreadCount: 1 });
+  expect(await view("", fixture.instructor.id)).toMatchObject({
+    unreadCount: 1,
+  });
+});
+
+test("deleting a question proactively removes its update but preserves accessible surviving replies; deleting the reply removes its history", async () => {
+  notify();
+  const reply = database()
+    .insert(comments)
+    .values({
+      userId: fixture.instructor.id,
+      lessonId: fixture.lesson.id,
+      parentId: fixture.question.id,
+      body: "Survives",
+    })
+    .returning()
+    .get();
+  const update = createNotifications(
+    database(),
+    {
+      kind: "reply_created",
+      sourceEventKey: "reply",
+      lessonId: fixture.lesson.id,
+      questionId: fixture.question.id,
+      replyId: reply.id,
+    },
+    [fixture.user.id]
+  )[0];
+  const remove = async (commentId: number) =>
+    lessonAction({
+      request: await request("", fixture.instructor.id, {
+        intent: "delete-comment",
+        commentId: String(commentId),
+      }),
+      params: {
+        slug: fixture.course.slug,
+        lessonId: String(fixture.lesson.id),
+      },
+    } as Parameters<typeof lessonAction>[0]);
+  await remove(fixture.question.id);
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .all()
+      .map((row) => row.id)
+  ).toEqual([update.id]);
+  expect(await view()).toMatchObject({
+    items: [
+      {
+        id: update.id,
+        target: { status: "deleted", body: null, reply: { body: "Survives" } },
+      },
+    ],
+    unreadCount: 1,
+  });
+  await remove(reply.id);
+  expect(database().select().from(notifications).all()).toEqual([]);
+  expect(database().select().from(comments).all()).toHaveLength(2);
+  expect(await view()).toMatchObject({ items: [], unreadCount: 0 });
+});
+
+test("read and unread history expires at exactly 90 UTC days, stays physically idle, then is deleted in bounded requests", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-20T12:00:00.000Z"));
+  const readItem = notify("read");
+  const unreadItem = notify("unread");
+  for (let index = 0; index < 248; index++) notify(`old-${index}`);
+  vi.setSystemTime(new Date("2026-11-18T11:59:59.999Z"));
+  await read({ intent: "read", id: String(readItem.id) });
+  expect((await view(`?id=${readItem.id}`)).item?.readAt).toBe(
+    "2026-11-18T11:59:59.999Z"
+  );
+  expect((await view()).unreadCount).toBe(249);
+  vi.setSystemTime(new Date("2026-11-18T12:00:00.000Z"));
+  expect(database().select().from(notifications).all()).toHaveLength(250);
+  await read({ intent: "read-all" });
+  expect(database().select().from(notifications).all()).toHaveLength(150);
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .all()
+      .every((row) => row.readAt === null)
+  ).toBe(true);
+  expect(await view()).toMatchObject({ items: [], unreadCount: 0 });
+  const remaining = database().select().from(notifications).all().length;
+  expect(remaining).toBeGreaterThan(0);
+  expect(remaining).toBeLessThan(250);
+  for (const item of [readItem, unreadItem]) {
+    await expect(view(`?id=${item.id}`)).rejects.toMatchObject({
+      data: "Unavailable",
+      init: { status: 404 },
+    });
+    await expect(
+      read({ intent: "read", id: String(item.id) })
+    ).rejects.toMatchObject({ data: "Unavailable", init: { status: 404 } });
+  }
+  await read({ intent: "read-all" });
+  expect(database().select().from(notifications).all()).toEqual([]);
+  expect(database().select().from(comments).all()).toHaveLength(1);
+  expect(database().select().from(enrollments).all()).toHaveLength(1);
+});
+
+test("bounded request cleanup advances past accessible history, removes stale access, and restoration never resurrects it", async () => {
+  for (let index = 0; index < 105; index++)
+    notify(`kept-${index}`, fixture.instructor.id);
+  const lost = notify("lost-enrollment");
+  database().delete(enrollments).run();
+  expect(await view()).toMatchObject({ items: [], unreadCount: 0 });
+  // The first request must not inspect an unbounded history.
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .where(eq(notifications.id, lost.id))
+      .get()
+  ).toBeDefined();
+  await appLoader({ request: await request() } as Parameters<
+    typeof appLoader
+  >[0]);
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .where(eq(notifications.id, lost.id))
+      .get()
+  ).toBeUndefined();
+  database()
+    .insert(enrollments)
+    .values({ userId: fixture.user.id, courseId: fixture.course.id })
+    .run();
+  expect(await view()).toMatchObject({ items: [], unreadCount: 0 });
+  expect((await view("", fixture.instructor.id)).unreadCount).toBe(105);
+});
+
+test.each(["Platform Admin", "course owner", "claimed Seat"])(
+  "refund approval preserves discussion history through overlapping %s access",
+  async (capacity) => {
+    const admin = database()
+      .insert(users)
+      .values({
+        name: "Admin",
+        email: "admin@example.com",
+        role: UserRole.Admin,
+      })
+      .returning()
+      .get();
+    const purchase = database()
+      .insert(purchases)
+      .values({
+        userId: fixture.user.id,
+        courseId: fixture.course.id,
+        amountPaid: 1000,
+      })
+      .returning()
+      .get();
+    const refund = database()
+      .insert(refunds)
+      .values({ purchaseId: purchase.id, reason: "Refund please" })
+      .returning()
+      .get();
+    if (capacity === "Platform Admin")
+      database()
+        .update(users)
+        .set({ role: UserRole.Admin })
+        .where(eq(users.id, fixture.user.id))
+        .run();
+    if (capacity === "course owner")
+      database()
+        .update(courses)
+        .set({ instructorId: fixture.user.id })
+        .where(eq(courses.id, fixture.course.id))
+        .run();
+    if (capacity === "claimed Seat") {
+      const team = database().insert(teams).values({}).returning().get();
+      const licence = database()
+        .insert(purchases)
+        .values({
+          userId: fixture.instructor.id,
+          courseId: fixture.course.id,
+          amountPaid: 1000,
+        })
+        .returning()
+        .get();
+      database()
+        .insert(coupons)
+        .values({
+          teamId: team.id,
+          purchaseId: licence.id,
+          courseId: fixture.course.id,
+          code: "OVERLAPPING",
+          redeemedByUserId: fixture.user.id,
+          redeemedAt: new Date().toISOString(),
+        })
+        .run();
+    }
+    const discussion = notify();
+    await decide({
+      request: await request("", admin.id, {
+        intent: "approve",
+        refundRequestId: String(refund.id),
+      }),
+    } as Parameters<typeof decide>[0]);
+    expect((await view()).items.map((item) => item.kind).sort()).toEqual([
+      "question_created",
+      "refund_approved",
+    ]);
+    expect((await view(`?id=${discussion.id}`)).item?.readAt).toBeNull();
+    expect(database().select().from(comments).all()).toHaveLength(1);
+  }
+);
+
+test("crossing expiry during request authorization never exposes or acknowledges an expired item", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-20T12:00:00.000Z"));
+  const item = notify();
+  for (const operation of ["list", "read", "read-all"]) {
+    vi.setSystemTime(new Date("2026-11-18T11:59:59.999Z"));
+    const incoming = await request(
+      "",
+      fixture.user.id,
+      operation === "list"
+        ? undefined
+        : { intent: operation, id: String(item.id) }
+    );
+    const getHeader = incoming.headers.get.bind(incoming.headers);
+    vi.spyOn(incoming.headers, "get").mockImplementation((name) => {
+      if (name.toLowerCase() === "cf-ipcountry")
+        vi.setSystemTime(new Date("2026-11-18T12:00:00.000Z"));
+      return getHeader(name);
+    });
+    if (operation === "read")
+      await expect(
+        action({ request: incoming } as Parameters<typeof action>[0])
+      ).rejects.toMatchObject({ data: "Unavailable", init: { status: 404 } });
+    else if (operation === "read-all")
+      await action({ request: incoming } as Parameters<typeof action>[0]);
+    else
+      expect(
+        await loader({ request: incoming } as Parameters<typeof loader>[0])
+      ).toMatchObject({ items: [], unreadCount: 0 });
+  }
+  expect(
+    database()
+      .select()
+      .from(notifications)
+      .where(eq(notifications.id, item.id))
+      .get()?.readAt
+  ).toBeNull();
 });

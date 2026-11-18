@@ -1,3 +1,7 @@
+import {
+  cleanupNotifications,
+  notificationCutoff,
+} from "~/lib/notification-lifecycle.server";
 import { and, desc, eq, gt, lte, isNull, max } from "drizzle-orm";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -31,6 +35,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const recipientId = await requireUserId(request);
   if (!db.select().from(users).where(eq(users.id, recipientId)).get())
     throw data("Sign in required", { status: 401 });
+  cleanupNotifications(db);
   const parsed = querySchema.safeParse(
     Object.fromEntries(new URL(request.url).searchParams)
   );
@@ -47,19 +52,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
     .where(
       and(
         eq(notifications.recipientId, recipientId),
-        gt(
-          notifications.createdAt,
-          new Date(Date.now() - 90 * 86400000).toISOString()
-        )
+        gt(notifications.createdAt, notificationCutoff())
       )
     )
     .orderBy(desc(notifications.createdAt), desc(notifications.id))
     .all();
-  const items = [];
+  const resolved = [];
   for (const row of rows) {
     const target = await resolveNotification(request, row);
     if (target)
-      items.push({
+      resolved.push({
         id: row.id,
         kind: row.kind,
         createdAt: row.createdAt,
@@ -67,6 +69,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         target,
       });
   }
+  // Authorization awaits may cross the retention boundary.
+  const cutoff = notificationCutoff();
+  const items = resolved.filter((item) => item.createdAt > cutoff);
   const item = id === undefined ? null : items.find((item) => item.id === id);
   if (id !== undefined && !item) throw data("Unavailable", { status: 404 });
   const candidates = items.filter(
@@ -123,6 +128,7 @@ export async function action({ request }: LoaderFunctionArgs) {
   const recipientId = await requireUserId(request);
   if (!db.select().from(users).where(eq(users.id, recipientId)).get())
     throw data("Sign in required", { status: 401 });
+  cleanupNotifications(db);
   if (parsed.data.intent === "read-all") {
     const rows = db
       .select()
@@ -132,10 +138,7 @@ export async function action({ request }: LoaderFunctionArgs) {
           eq(notifications.recipientId, recipientId),
           lte(notifications.id, watermark),
           isNull(notifications.readAt),
-          gt(
-            notifications.createdAt,
-            new Date(Date.now() - 90 * 86400000).toISOString()
-          )
+          gt(notifications.createdAt, notificationCutoff())
         )
       )
       .all();
@@ -147,7 +150,8 @@ export async function action({ request }: LoaderFunctionArgs) {
             and(
               eq(notifications.id, row.id),
               eq(notifications.recipientId, recipientId),
-              isNull(notifications.readAt)
+              isNull(notifications.readAt),
+              gt(notifications.createdAt, notificationCutoff())
             )
           )
           .run();
@@ -161,14 +165,15 @@ export async function action({ request }: LoaderFunctionArgs) {
       and(
         eq(notifications.id, parsed.data.id),
         eq(notifications.recipientId, recipientId),
-        gt(
-          notifications.createdAt,
-          new Date(Date.now() - 90 * 86400000).toISOString()
-        )
+        gt(notifications.createdAt, notificationCutoff())
       )
     )
     .get();
-  if (!row || !(await resolveNotification(request, row)))
+  if (
+    !row ||
+    !(await resolveNotification(request, row)) ||
+    row.createdAt <= notificationCutoff()
+  )
     throw data("Unavailable", { status: 404 });
   db.update(notifications)
     .set({ readAt: row.readAt ?? new Date().toISOString() })
