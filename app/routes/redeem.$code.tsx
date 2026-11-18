@@ -6,21 +6,32 @@ import type { Route } from "./+types/redeem.$code";
 import { getCurrentUserId } from "~/lib/session";
 import { resolveCountry } from "~/lib/country.server";
 import { parseParams, parseFormData } from "~/lib/validation";
-import { getSeatAvailability, type SeatAvailability } from "~/lib/refunds.server";
+import {
+  getSeatAvailability,
+  type SeatAvailability,
+} from "~/lib/refunds.server";
 import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Ticket, AlertCircle, CheckCircle2, Globe } from "lucide-react";
 import { data } from "react-router";
 import { db } from "~/db";
-import { purchases, coupons, courses, enrollments } from "~/db/schema";
-import { eq, and } from "drizzle-orm";
+import { createNotifications } from "~/lib/notifications.server";
+import {
+  purchases,
+  coupons,
+  courses,
+  enrollments,
+  teamMembers,
+  TeamMemberRole,
+} from "~/db/schema";
+import { eq, and, isNull } from "drizzle-orm";
 
 function getCourseById(id: number) {
   return db.select().from(courses).where(eq(courses.id, id)).get();
 }
 
-function getCouponByCode(code: string) {
-  return db.select().from(coupons).where(eq(coupons.code, code)).get();
+function getCouponByCode(database: Pick<typeof db, "select">, code: string) {
+  return database.select().from(coupons).where(eq(coupons.code, code)).get();
 }
 
 function isUserEnrolled(userId: number, courseId: number) {
@@ -55,65 +66,99 @@ function redeemCoupon(
   userId: number,
   userCountry: string
 ): RedeemResult {
-  const coupon = getCouponByCode(code);
-  if (!coupon) {
-    return { ok: false, error: "Coupon not found" };
-  }
+  return db.transaction(
+    (tx): RedeemResult => {
+      const coupon = getCouponByCode(tx, code);
+      if (!coupon) {
+        return { ok: false, error: "Coupon not found" };
+      }
 
-  if (coupon.redeemedByUserId !== null) {
-    return { ok: false, error: "Coupon has already been redeemed" };
-  }
+      if (coupon.redeemedByUserId !== null) {
+        return { ok: false, error: "Coupon has already been redeemed" };
+      }
 
-  const availability = getSeatAvailability(db, coupon);
-  const unavailableReason = seatUnavailableReason(availability);
-  if (unavailableReason) {
-    return { ok: false, error: unavailableReason };
-  }
+      const availability = getSeatAvailability(tx, coupon);
+      const unavailableReason = seatUnavailableReason(availability);
+      if (unavailableReason) {
+        return { ok: false, error: unavailableReason };
+      }
 
-  const existingEnrollment = db
-    .select()
-    .from(enrollments)
-    .where(
-      and(
-        eq(enrollments.userId, userId),
-        eq(enrollments.courseId, coupon.courseId)
-      )
-    )
-    .get();
+      const existingEnrollment = tx
+        .select()
+        .from(enrollments)
+        .where(
+          and(
+            eq(enrollments.userId, userId),
+            eq(enrollments.courseId, coupon.courseId)
+          )
+        )
+        .get();
 
-  if (existingEnrollment) {
-    return { ok: false, error: "You are already enrolled in this course" };
-  }
+      if (existingEnrollment) {
+        return { ok: false, error: "You are already enrolled in this course" };
+      }
 
-  const purchase = db
-    .select()
-    .from(purchases)
-    .where(eq(purchases.id, coupon.purchaseId))
-    .get();
+      const purchase = tx
+        .select()
+        .from(purchases)
+        .where(eq(purchases.id, coupon.purchaseId))
+        .get();
 
-  if (purchase?.country && purchase.country !== userCountry) {
-    return {
-      ok: false,
-      error:
-        "This coupon can only be redeemed from the same country as the purchaser",
-    };
-  }
+      if (purchase?.country && purchase.country !== userCountry) {
+        return {
+          ok: false,
+          error:
+            "This coupon can only be redeemed from the same country as the purchaser",
+        };
+      }
 
-  db.update(coupons)
-    .set({
-      redeemedByUserId: userId,
-      redeemedAt: new Date().toISOString(),
-    })
-    .where(eq(coupons.id, coupon.id))
-    .run();
+      const claimed = tx
+        .update(coupons)
+        .set({
+          redeemedByUserId: userId,
+          redeemedAt: new Date().toISOString(),
+        })
+        .where(and(eq(coupons.id, coupon.id), isNull(coupons.redeemedByUserId)))
+        .returning()
+        .get();
+      if (!claimed)
+        return { ok: false, error: "Coupon has already been redeemed" };
 
-  const enrollment = db
-    .insert(enrollments)
-    .values({ userId, courseId: coupon.courseId })
-    .returning()
-    .get();
+      const enrollment = tx
+        .insert(enrollments)
+        .values({ userId, courseId: coupon.courseId })
+        .returning()
+        .get();
 
-  return { ok: true, enrollment };
+      if (process.env.CADENCE_NOTIFICATIONS_ENABLED === "true") {
+        const recipientIds = tx
+          .select({ userId: teamMembers.userId })
+          .from(teamMembers)
+          .where(
+            and(
+              eq(teamMembers.teamId, coupon.teamId),
+              eq(teamMembers.role, TeamMemberRole.Admin)
+            )
+          )
+          .all()
+          .map((member) => member.userId)
+          .filter((id) => id !== userId);
+        createNotifications(
+          tx,
+          {
+            sourceEventKey: `seat:${coupon.id}:claimed`,
+            kind: "seat_claimed",
+            seatId: coupon.id,
+            teamId: coupon.teamId,
+          },
+          recipientIds
+        );
+      }
+
+      return { ok: true, enrollment };
+    },
+    { behavior: "immediate" }
+  );
 }
 
 const redeemParamsSchema = z.object({
@@ -135,7 +180,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ params, request }: Route.LoaderArgs) {
   const { code } = parseParams(params, redeemParamsSchema);
 
-  const coupon = getCouponByCode(code);
+  const coupon = getCouponByCode(db, code);
   if (!coupon) {
     throw data("Coupon not found.", { status: 404 });
   }
@@ -236,7 +281,10 @@ export default function Redeem({
 
   // Determine which state to show
   const canRedeem =
-    !alreadyRedeemed && !alreadyEnrolled && !countryMismatch && !unavailableReason;
+    !alreadyRedeemed &&
+    !alreadyEnrolled &&
+    !countryMismatch &&
+    !unavailableReason;
 
   return (
     <div className="mx-auto max-w-2xl p-6 lg:p-8">
