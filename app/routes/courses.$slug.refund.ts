@@ -18,6 +18,7 @@ const refundActionSchema = z.object({
   // their Individual Purchase from the course page, or a Team Licence from
   // the team page.
   purchaseId: z.coerce.number().int(),
+  previousRefundRequestId: z.coerce.number().int().nonnegative(),
   reason: z
     .string()
     .trim()
@@ -47,7 +48,9 @@ export async function action({ params, request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, refundActionSchema);
 
   if (!parsed.success) {
-    return data({ errors: parsed.errors }, { status: 400 });
+    throw data(Object.values(parsed.errors)[0] ?? "Invalid input.", {
+      status: 400,
+    });
   }
 
   const purchase = db
@@ -65,7 +68,8 @@ export async function action({ params, request }: Route.ActionArgs) {
     purchase.id,
     currentUserId,
     parsed.data.reason,
-    new Date()
+    new Date(),
+    parsed.data.previousRefundRequestId
   );
 
   if (!result.ok) {
