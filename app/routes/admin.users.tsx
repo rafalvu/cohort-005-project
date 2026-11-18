@@ -1,3 +1,4 @@
+import { pruneRecipientNotifications } from "~/lib/notification-lifecycle.server";
 import { useState, useRef, useEffect } from "react";
 import { useFetcher } from "react-router";
 import { toast } from "sonner";
@@ -58,12 +59,16 @@ function updateUser(
 }
 
 function updateUserRole(id: number, role: UserRole) {
-  return db
-    .update(users)
-    .set({ role })
-    .where(eq(users.id, id))
-    .returning()
-    .get();
+  return db.transaction((tx) => {
+    const user = tx
+      .update(users)
+      .set({ role })
+      .where(eq(users.id, id))
+      .returning()
+      .get();
+    pruneRecipientNotifications(tx, id);
+    return user;
+  });
 }
 
 export function meta() {

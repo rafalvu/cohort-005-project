@@ -1,3 +1,4 @@
+import { pruneRecipientNotifications } from "~/lib/notification-lifecycle.server";
 import {
   and,
   asc,
@@ -738,6 +739,8 @@ export function approveRefundRequest(
           .run();
       }
     }
+
+    pruneRecipientNotifications(tx, purchase.userId);
 
     tx.update(refunds)
       .set({

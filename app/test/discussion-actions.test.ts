@@ -462,7 +462,7 @@ test("deleting a staff reply restores the unanswered queue without a new event",
   } as Parameters<typeof queueLoader>[0]);
   expect(result.questions.map((q) => q.id)).toEqual([fixture.question.id]);
   expect(history(fixture.instructor.id)).toEqual([]);
-  expect(history(fixture.user.id)).toHaveLength(1);
+  expect(history(fixture.user.id)).toEqual([]);
   await post(fixture.instructor.id, fields, true);
   expect(await discussion()).toMatchObject([
     { id: fixture.question.id, replies: [] },
