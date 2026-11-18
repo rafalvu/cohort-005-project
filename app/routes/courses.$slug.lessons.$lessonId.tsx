@@ -1,3 +1,4 @@
+import { pruneDeletedCommentNotifications } from "~/lib/notification-lifecycle.server";
 import { createDiscussionComment } from "~/lib/discussions.server";
 import { useState, useEffect, useCallback } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
@@ -437,12 +438,16 @@ function deleteComment(commentId: number, userId: number, isStaff: boolean) {
     return existing;
   }
 
-  return db
-    .update(comments)
-    .set({ deletedAt: new Date().toISOString() })
-    .where(eq(comments.id, commentId))
-    .returning()
-    .get();
+  return db.transaction((tx) => {
+    const comment = tx
+      .update(comments)
+      .set({ deletedAt: new Date().toISOString() })
+      .where(eq(comments.id, commentId))
+      .returning()
+      .get();
+    pruneDeletedCommentNotifications(tx, commentId);
+    return comment;
+  });
 }
 
 function getQuizByLessonId(lessonId: number) {

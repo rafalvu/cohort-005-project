@@ -1,3 +1,4 @@
+import { cleanupNotifications } from "~/lib/notification-lifecycle.server";
 import { Outlet } from "react-router";
 import type { Route } from "./+types/layout.app";
 import { Sidebar } from "~/components/sidebar";
@@ -175,6 +176,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const users = getAllUsers();
   const currentUserId = await getCurrentUserId(request);
   const currentUser = currentUserId ? getUserById(currentUserId) : null;
+  if (currentUser) cleanupNotifications(db);
   const devCountry = await getDevCountry(request);
   const countryTierInfo = getCountryTierInfo(devCountry);
 
