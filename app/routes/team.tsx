@@ -400,12 +400,13 @@ function TeamLicenceRow({ licence }: { licence: TeamLicence }) {
           )}
         </div>
 
-        {refundRequest?.status === RefundStatus.Declined && refundRequest.decisionNote && (
-          <p className="mt-3 rounded-md bg-muted p-2 text-sm">
-            <span className="font-medium">Refund declined: </span>
-            {refundRequest.decisionNote}
-          </p>
-        )}
+        {refundRequest?.status === RefundStatus.Declined &&
+          refundRequest.decisionNote && (
+            <p className="mt-3 rounded-md bg-muted p-2 text-sm">
+              <span className="font-medium">Refund declined: </span>
+              {refundRequest.decisionNote}
+            </p>
+          )}
 
         {licence.canRequestRefund && isFormOpen && (
           <fetcher.Form
@@ -418,9 +419,17 @@ function TeamLicenceRow({ licence }: { licence: TeamLicence }) {
               has read your note. Until then, none of this licence&apos;s seats
               can be claimed. You can ask until{" "}
               {/* A calendar day, so read it as local midnight, not UTC. */}
-              {new Date(`${licence.lastDayInWindow}T00:00`).toLocaleDateString()}.
+              {new Date(
+                `${licence.lastDayInWindow}T00:00`
+              ).toLocaleDateString()}
+              .
             </p>
             <input type="hidden" name="purchaseId" value={licence.purchaseId} />
+            <input
+              type="hidden"
+              name="previousRefundRequestId"
+              value={refundRequest?.id ?? 0}
+            />
             <Textarea
               name="reason"
               rows={3}
