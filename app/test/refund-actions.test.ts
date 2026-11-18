@@ -53,7 +53,7 @@ function database() {
 }
 let fixture: ReturnType<typeof seedBaseData>;
 let purchaseId: number;
-let admins: number[];
+let platformAdminIds: number[];
 beforeEach(() => {
   holder.db = createTestDb();
   fixture = seedBaseData(database());
@@ -72,12 +72,12 @@ beforeEach(() => {
     .insert(enrollments)
     .values({ userId: fixture.user.id, courseId: fixture.course.id })
     .run();
-  admins = [1, 2].map(
+  platformAdminIds = [1, 2].map(
     (n) =>
       database()
         .insert(users)
         .values({
-          name: `Admin ${n}`,
+          name: `Platform Admin ${n}`,
           email: `admin${n}@example.com`,
           role: UserRole.Admin,
         })
@@ -90,24 +90,36 @@ afterEach(() => {
   database().$client.close();
   vi.unstubAllEnvs();
 });
-async function post(
+async function authenticatedPost(
   actor: number,
   fields: Record<string, string>,
-  decision = false
+  url: string
 ) {
-  const url = "http://localhost/admin/refunds";
   const cookie = await setCurrentUserId(new Request(url), actor);
-  const request = new Request(url, {
+  return new Request(url, {
     method: "POST",
     headers: { Cookie: cookie },
     body: new URLSearchParams(fields),
   });
-  return decision
-    ? decisionAction({ request } as Parameters<typeof decisionAction>[0])
-    : requestAction({
-        request,
-        params: { slug: fixture.course.slug },
-      } as Parameters<typeof requestAction>[0]);
+}
+async function requestRefund(actor: number, fields: Record<string, string>) {
+  const request = await authenticatedPost(
+    actor,
+    fields,
+    `http://localhost/courses/${fixture.course.slug}/refund`
+  );
+  return requestAction({
+    request,
+    params: { slug: fixture.course.slug },
+  } as Parameters<typeof requestAction>[0]);
+}
+async function decideRefund(actor: number, fields: Record<string, string>) {
+  const request = await authenticatedPost(
+    actor,
+    fields,
+    "http://localhost/admin/refunds"
+  );
+  return decisionAction({ request } as Parameters<typeof decisionAction>[0]);
 }
 function requestFields(previous = 0) {
   return {
@@ -121,7 +133,7 @@ function history(id: number) {
 }
 async function review(status = RefundStatus.Open) {
   const url = new URL(`http://localhost/admin/refunds?status=${status}`);
-  const cookie = await setCurrentUserId(new Request(url), admins[0]);
+  const cookie = await setCurrentUserId(new Request(url), platformAdminIds[0]);
   return (
     await reviewLoader({
       request: new Request(url, { headers: { Cookie: cookie } }),
@@ -130,8 +142,8 @@ async function review(status = RefundStatus.Open) {
   ).refundRequests;
 }
 test("a Refund Request notifies every Platform Admin and separately emails the buyer", async () => {
-  await post(fixture.user.id, requestFields());
-  for (const id of admins)
+  await requestRefund(fixture.user.id, requestFields());
+  for (const id of platformAdminIds)
     expect(history(id)).toMatchObject([
       { kind: "refund_requested", purchaseId },
     ]);
@@ -142,7 +154,7 @@ test("a Refund Request notifies every Platform Admin and separately emails the b
 test.each(["approve", "decline"])(
   "%s notifies only the buyer and concurrent decisions have one winner",
   async (intent) => {
-    await post(fixture.user.id, requestFields());
+    await requestRefund(fixture.user.id, requestFields());
     const [request] = await review();
     const fields = {
       intent,
@@ -150,7 +162,7 @@ test.each(["approve", "decline"])(
       note: "Reviewed request",
     };
     const results = await Promise.allSettled(
-      admins.map((id) => post(id, fields, true))
+      platformAdminIds.map((id) => decideRefund(id, fields))
     );
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
@@ -161,28 +173,26 @@ test.each(["approve", "decline"])(
         refundRequestId: request.id,
       },
     ]);
-    for (const id of admins) expect(history(id)).toHaveLength(1);
+    for (const id of platformAdminIds) expect(history(id)).toHaveLength(1);
     expect(holder.emails).toHaveLength(2);
   }
 );
 test("replaying a request after decline cannot create another outcome; a fresh offer can", async () => {
-  await post(fixture.user.id, requestFields());
+  await requestRefund(fixture.user.id, requestFields());
   const [request] = await review();
-  await post(
-    admins[0],
-    {
-      intent: "decline",
-      refundRequestId: String(request.id),
-      note: "Reviewed",
-    },
-    true
-  );
-  await expect(post(fixture.user.id, requestFields())).rejects.toMatchObject({
+  await decideRefund(platformAdminIds[0], {
+    intent: "decline",
+    refundRequestId: String(request.id),
+    note: "Reviewed",
+  });
+  await expect(
+    requestRefund(fixture.user.id, requestFields())
+  ).rejects.toMatchObject({
     init: { status: 409 },
   });
-  await post(fixture.user.id, requestFields(request.id));
+  await requestRefund(fixture.user.id, requestFields(request.id));
   expect(await review()).toHaveLength(1);
-  expect(history(admins[0])).toHaveLength(2);
+  expect(history(platformAdminIds[0])).toHaveLength(2);
   expect(holder.emails).toHaveLength(3);
 });
 test.each(["request", "approve", "decline"])(
@@ -190,11 +200,12 @@ test.each(["request", "approve", "decline"])(
   async (intent) => {
     let requestId = 0;
     if (intent !== "request") {
-      await post(fixture.user.id, requestFields());
+      await requestRefund(fixture.user.id, requestFields());
       requestId = (await review())[0].id;
     }
     const before = await review();
-    const blocked = intent === "request" ? admins[1] : fixture.user.id;
+    const blocked =
+      intent === "request" ? platformAdminIds[1] : fixture.user.id;
     database().run(
       sql.raw(
         `CREATE TRIGGER reject_notification BEFORE INSERT ON notifications WHEN NEW.recipient_id = ${blocked} BEGIN SELECT RAISE(ABORT, 'Injected persistence failure'); END`
@@ -202,27 +213,28 @@ test.each(["request", "approve", "decline"])(
     );
     await expect(
       intent === "request"
-        ? post(fixture.user.id, requestFields())
-        : post(
-            admins[0],
-            { intent, refundRequestId: String(requestId), note: "Reviewed" },
-            true
-          )
+        ? requestRefund(fixture.user.id, requestFields())
+        : decideRefund(platformAdminIds[0], {
+            intent,
+            refundRequestId: String(requestId),
+            note: "Reviewed",
+          })
     ).rejects.toThrow();
     expect(await review()).toEqual(before);
     expect(history(fixture.user.id)).toEqual([]);
-    for (const id of admins)
+    for (const id of platformAdminIds)
       expect(history(id)).toHaveLength(intent === "request" ? 0 : 1);
     expect(holder.emails).toHaveLength(intent === "request" ? 0 : 1);
     expect(database().select().from(enrollments).all()).toHaveLength(1);
     database().run(sql.raw("DROP TRIGGER reject_notification"));
-    if (intent === "request") await post(fixture.user.id, requestFields());
+    if (intent === "request")
+      await requestRefund(fixture.user.id, requestFields());
     else
-      await post(
-        admins[0],
-        { intent, refundRequestId: String(requestId), note: "Reviewed" },
-        true
-      );
+      await decideRefund(platformAdminIds[0], {
+        intent,
+        refundRequestId: String(requestId),
+        note: "Reviewed",
+      });
   }
 );
 test("overlapping Platform Admin buyer is excluded from their request and own decision but receives both emails", async () => {
@@ -231,19 +243,15 @@ test("overlapping Platform Admin buyer is excluded from their request and own de
     .set({ role: UserRole.Admin })
     .where(eq(users.id, fixture.user.id))
     .run();
-  await post(fixture.user.id, requestFields());
+  await requestRefund(fixture.user.id, requestFields());
   const [request] = await review();
-  await post(
-    fixture.user.id,
-    {
-      intent: "approve",
-      refundRequestId: String(request.id),
-      note: "Reviewed",
-    },
-    true
-  );
+  await decideRefund(fixture.user.id, {
+    intent: "approve",
+    refundRequestId: String(request.id),
+    note: "Reviewed",
+  });
   expect(history(fixture.user.id)).toEqual([]);
-  for (const id of admins) expect(history(id)).toHaveLength(1);
+  for (const id of platformAdminIds) expect(history(id)).toHaveLength(1);
   expect(holder.emails.map((e) => e.to)).toEqual([
     fixture.user.email,
     fixture.user.email,
@@ -251,43 +259,50 @@ test("overlapping Platform Admin buyer is excluded from their request and own de
 });
 test("concurrent request submissions save and email once", async () => {
   const results = await Promise.allSettled([
-    post(fixture.user.id, requestFields()),
-    post(fixture.user.id, requestFields()),
+    requestRefund(fixture.user.id, requestFields()),
+    requestRefund(fixture.user.id, requestFields()),
   ]);
   expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
   expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
   expect(await review()).toHaveLength(1);
-  for (const id of admins) expect(history(id)).toHaveLength(1);
+  for (const id of platformAdminIds) expect(history(id)).toHaveLength(1);
   expect(holder.emails).toHaveLength(1);
 });
 test("unauthorized actors, malformed requests and missing replay guards make no updates", async () => {
-  await expect(post(admins[0], requestFields())).rejects.toMatchObject({
+  await expect(
+    requestRefund(platformAdminIds[0], requestFields())
+  ).rejects.toMatchObject({
     init: { status: 404 },
   });
   await expect(
-    post(fixture.user.id, { intent: "approve", refundRequestId: "1" }, true)
+    decideRefund(fixture.user.id, { intent: "approve", refundRequestId: "1" })
   ).rejects.toMatchObject({ init: { status: 403 } });
   const { previousRefundRequestId: _previous, ...missing } = requestFields();
-  await expect(post(fixture.user.id, missing)).rejects.toMatchObject({
+  await expect(requestRefund(fixture.user.id, missing)).resolves.toMatchObject({
+    data: { errors: { previousRefundRequestId: expect.any(String) } },
     init: { status: 400 },
   });
   await expect(
-    post(fixture.user.id, { ...requestFields(), reason: "short" })
-  ).rejects.toMatchObject({ init: { status: 400 } });
+    requestRefund(fixture.user.id, { ...requestFields(), reason: "short" })
+  ).resolves.toMatchObject({
+    data: {
+      errors: { reason: "Tell us a little more about why you want a refund." },
+    },
+    init: { status: 400 },
+  });
   expect(await review()).toEqual([]);
-  for (const id of admins) expect(history(id)).toEqual([]);
+  for (const id of platformAdminIds) expect(history(id)).toEqual([]);
   expect(holder.emails).toEqual([]);
 });
 test("inactive feature preserves refund workflow without Notifications", async () => {
   vi.stubEnv("CADENCE_NOTIFICATIONS_ENABLED", "false");
-  await post(fixture.user.id, requestFields());
+  await requestRefund(fixture.user.id, requestFields());
   const [request] = await review();
-  await post(
-    admins[0],
-    { intent: "approve", refundRequestId: String(request.id) },
-    true
-  );
-  for (const id of [...admins, fixture.user.id])
+  await decideRefund(platformAdminIds[0], {
+    intent: "approve",
+    refundRequestId: String(request.id),
+  });
+  for (const id of [...platformAdminIds, fixture.user.id])
     expect(history(id)).toEqual([]);
   expect(await review(RefundStatus.Approved)).toHaveLength(1);
   expect(holder.emails).toHaveLength(2);
@@ -301,7 +316,11 @@ async function teamView() {
 }
 function makeTeamLicence() {
   const team = database().insert(teams).values({}).returning().get();
-  for (const userId of [fixture.user.id, fixture.instructor.id, admins[0]])
+  for (const userId of [
+    fixture.user.id,
+    fixture.instructor.id,
+    platformAdminIds[0],
+  ])
     database()
       .insert(teamMembers)
       .values({ teamId: team.id, userId, role: TeamMemberRole.Admin })
@@ -321,7 +340,7 @@ test.each(["approve", "decline"])(
   "Team Licence %s notifies its buyer privately and preserves all-or-nothing Seat rules",
   async (intent) => {
     makeTeamLicence();
-    const response = await post(fixture.user.id, requestFields());
+    const response = await requestRefund(fixture.user.id, requestFields());
     if (!(response instanceof Response)) throw new Error("Expected redirect");
     expect(response.headers.get("Location")).toBe("/team");
     expect((await teamView()).couponRows.map((c) => c.availability)).toEqual([
@@ -329,11 +348,11 @@ test.each(["approve", "decline"])(
       "on_hold",
     ]);
     const [request] = await review();
-    await post(
-      admins[0],
-      { intent, refundRequestId: String(request.id), note: "Reviewed" },
-      true
-    );
+    await decideRefund(platformAdminIds[0], {
+      intent,
+      refundRequestId: String(request.id),
+      note: "Reviewed",
+    });
     expect((await teamView()).couponRows.map((c) => c.availability)).toEqual(
       intent === "approve"
         ? ["refunded", "refunded"]
@@ -343,7 +362,7 @@ test.each(["approve", "decline"])(
       { kind: intent === "approve" ? "refund_approved" : "refund_declined" },
     ]);
     expect(history(fixture.instructor.id)).toEqual([]);
-    expect(history(admins[0])).toHaveLength(1);
+    expect(history(platformAdminIds[0])).toHaveLength(1);
   }
 );
 test("a claimed Team Licence Seat prevents a request and produces no updates", async () => {
@@ -356,14 +375,16 @@ test("a claimed Team Licence Seat prevents a request and produces no updates", a
     })
     .where(eq(coupons.code, "FIRST"))
     .run();
-  await expect(post(fixture.user.id, requestFields())).rejects.toMatchObject({
+  await expect(
+    requestRefund(fixture.user.id, requestFields())
+  ).rejects.toMatchObject({
     init: { status: 403 },
   });
   expect(await review()).toEqual([]);
-  for (const id of admins) expect(history(id)).toEqual([]);
+  for (const id of platformAdminIds) expect(history(id)).toEqual([]);
   expect(holder.emails).toEqual([]);
 });
-test("approval removes Individual Purchase Enrollment while preserving learner progress", async () => {
+test("approval removes Individual Purchase Enrollment while preserving Student progress", async () => {
   const module = database()
     .insert(modules)
     .values({ courseId: fixture.course.id, title: "Module", position: 1 })
@@ -383,21 +404,20 @@ test("approval removes Individual Purchase Enrollment while preserving learner p
     })
     .returning()
     .get();
-  await post(fixture.user.id, requestFields());
+  await requestRefund(fixture.user.id, requestFields());
   expect(database().select().from(enrollments).all()).toHaveLength(1);
   const [request] = await review();
-  await post(
-    admins[0],
-    { intent: "approve", refundRequestId: String(request.id) },
-    true
-  );
+  await decideRefund(platformAdminIds[0], {
+    intent: "approve",
+    refundRequestId: String(request.id),
+  });
   expect(database().select().from(enrollments).all()).toEqual([]);
   expect(database().select().from(lessonProgress).all()).toEqual([progress]);
   expect(history(fixture.user.id)).toHaveLength(1);
 });
 test("failed Team Licence approval preserves every frozen Seat and can retry", async () => {
   makeTeamLicence();
-  await post(fixture.user.id, requestFields());
+  await requestRefund(fixture.user.id, requestFields());
   const [request] = await review();
   database().run(
     sql.raw(
@@ -405,14 +425,14 @@ test("failed Team Licence approval preserves every frozen Seat and can retry", a
     )
   );
   const fields = { intent: "approve", refundRequestId: String(request.id) };
-  await expect(post(admins[0], fields, true)).rejects.toThrow();
+  await expect(decideRefund(platformAdminIds[0], fields)).rejects.toThrow();
   expect((await teamView()).couponRows.map((c) => c.availability)).toEqual([
     "on_hold",
     "on_hold",
   ]);
   expect(await review()).toHaveLength(1);
   database().run(sql.raw("DROP TRIGGER reject_notification"));
-  await post(admins[0], fields, true);
+  await decideRefund(platformAdminIds[0], fields);
   expect((await teamView()).couponRows.map((c) => c.availability)).toEqual([
     "refunded",
     "refunded",
