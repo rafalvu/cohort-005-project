@@ -30,8 +30,8 @@ function getCourseById(id: number) {
   return db.select().from(courses).where(eq(courses.id, id)).get();
 }
 
-function getCouponByCode(code: string) {
-  return db.select().from(coupons).where(eq(coupons.code, code)).get();
+function getCouponByCode(database: Pick<typeof db, "select">, code: string) {
+  return database.select().from(coupons).where(eq(coupons.code, code)).get();
 }
 
 function isUserEnrolled(userId: number, courseId: number) {
@@ -68,11 +68,7 @@ function redeemCoupon(
 ): RedeemResult {
   return db.transaction(
     (tx): RedeemResult => {
-      const coupon = tx
-        .select()
-        .from(coupons)
-        .where(eq(coupons.code, code))
-        .get();
+      const coupon = getCouponByCode(tx, code);
       if (!coupon) {
         return { ok: false, error: "Coupon not found" };
       }
@@ -184,7 +180,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 export async function loader({ params, request }: Route.LoaderArgs) {
   const { code } = parseParams(params, redeemParamsSchema);
 
-  const coupon = getCouponByCode(code);
+  const coupon = getCouponByCode(db, code);
   if (!coupon) {
     throw data("Coupon not found.", { status: 404 });
   }
