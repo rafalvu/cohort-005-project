@@ -737,9 +737,23 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   // Comments are confidential to the course: only people who can read the
   // lesson can read the discussion on it.
   const instructor = getUserById(course.instructorId);
-  const comments = canViewContent
-    ? await renderThread(getLessonThread(lessonId))
-    : [];
+  const selectedQuestion = z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .safeParse(
+      new URL(request.url).searchParams.get("questionId") ?? undefined
+    );
+  if (!selectedQuestion.success) throw data("Unavailable", { status: 404 });
+  const thread = canViewContent ? getLessonThread(lessonId) : [];
+  const selectedThread =
+    selectedQuestion.data === undefined
+      ? thread
+      : thread.filter((question) => question.id === selectedQuestion.data);
+  if (selectedQuestion.data !== undefined && selectedThread.length === 0)
+    throw data("Unavailable", { status: 404 });
+  const comments = await renderThread(selectedThread);
 
   // Render lesson content from Markdown to HTML server-side
   const contentHtml = lesson.content

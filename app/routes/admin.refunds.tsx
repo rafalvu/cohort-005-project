@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { Route } from "./+types/admin.refunds";
 import { getCurrentUserId } from "~/lib/session";
 import { parseFormData } from "~/lib/validation";
-import { RefundStatus, UserRole, users } from "~/db/schema";
+import { RefundStatus, UserRole, users, refunds } from "~/db/schema";
 import { db } from "~/db";
 import { eq } from "drizzle-orm";
 import { Card, CardContent } from "~/components/ui/card";
@@ -23,9 +23,7 @@ import {
 import { RULE_BREAK_LABELS } from "~/lib/refund-rules";
 import { sendEmail } from "~/lib/mailer.server";
 
-const refundFilterSchema = z
-  .nativeEnum(RefundStatus)
-  .catch(RefundStatus.Open);
+const refundFilterSchema = z.nativeEnum(RefundStatus).catch(RefundStatus.Open);
 
 const adminRefundActionSchema = z.discriminatedUnion("intent", [
   z.object({
@@ -83,11 +81,28 @@ export function meta() {
 export async function loader({ request, url }: Route.LoaderArgs) {
   await requirePlatformAdmin(request);
 
-  const status = refundFilterSchema.parse(url.searchParams.get("status"));
+  const selected = z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .safeParse(url.searchParams.get("refundRequestId") ?? undefined);
+  if (!selected.success) throw data("Unavailable", { status: 404 });
+  const refundRequest =
+    selected.data === undefined
+      ? undefined
+      : db.select().from(refunds).where(eq(refunds.id, selected.data)).get();
+  if (selected.data !== undefined && !refundRequest)
+    throw data("Unavailable", { status: 404 });
+  const status =
+    refundRequest?.status ??
+    refundFilterSchema.parse(url.searchParams.get("status"));
 
   return {
     status,
-    refundRequests: listRefundRequestsForReview(db, status, new Date()),
+    refundRequests: listRefundRequestsForReview(db, status, new Date()).filter(
+      (item) => selected.data === undefined || item.id === selected.data
+    ),
   };
 }
 
@@ -98,10 +113,9 @@ export async function action({ request }: Route.ActionArgs) {
   const parsed = parseFormData(formData, adminRefundActionSchema);
 
   if (!parsed.success) {
-    throw data(
-      Object.values(parsed.errors)[0] ?? "Invalid input.",
-      { status: 400 }
-    );
+    throw data(Object.values(parsed.errors)[0] ?? "Invalid input.", {
+      status: 400,
+    });
   }
 
   const { intent, refundRequestId, note } = parsed.data;
@@ -211,11 +225,7 @@ function formatHours(seconds: number) {
   return `${(seconds / 3600).toFixed(1)}h`;
 }
 
-function Figures({
-  refundRequest,
-}: {
-  refundRequest: RefundRequestForReview;
-}) {
+function Figures({ refundRequest }: { refundRequest: RefundRequestForReview }) {
   const { figures } = refundRequest;
 
   const items =
