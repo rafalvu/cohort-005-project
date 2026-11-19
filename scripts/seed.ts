@@ -1817,6 +1817,53 @@ This course is still in draft while the cluster examples are rewritten against t
 
   console.log(`Created ${countRows(schema.enrollments)} enrollments.`);
 
+  // ─── Private Bookmarks and Notes ───
+  // Two Students on the same Lesson make ownership easy to check in the DevUI.
+  db.insert(schema.bookmarks)
+    .values([
+      {
+        userId: students[0].id,
+        lessonId: course1LessonIds[0],
+        createdAt: daysAgo(2),
+      },
+      {
+        userId: students[0].id,
+        lessonId: course1LessonIds[1],
+        createdAt: daysAgo(1),
+      },
+      {
+        userId: students[1].id,
+        lessonId: course1LessonIds[0],
+        createdAt: daysAgo(1),
+      },
+    ])
+    .run();
+  db.insert(schema.notes)
+    .values([
+      {
+        userId: students[0].id,
+        lessonId: course1LessonIds[0],
+        body: "# My notes\nRevisit this example before the next lesson.",
+        createdAt: daysAgo(2),
+        updatedAt: hoursAgo(1),
+      },
+      {
+        userId: students[0].id,
+        lessonId: course1LessonIds[1],
+        body: "Try this in my own project.",
+        createdAt: daysAgo(1),
+        updatedAt: daysAgo(1),
+      },
+      {
+        userId: students[1].id,
+        lessonId: course1LessonIds[0],
+        body: "A private thought for my next study session.",
+        createdAt: daysAgo(1),
+        updatedAt: daysAgo(1),
+      },
+    ])
+    .run();
+
   // ─── Course Ratings ───
   // Star ratings from enrolled students only. Not everyone rates.
   // Course 1 averages 4.3 (4 ratings), course 2 averages 4.5 (2 ratings).
@@ -2849,6 +2896,7 @@ This course is still in draft while the cluster examples are rewritten against t
   console.log(`  Enrollments: ${countRows(schema.enrollments)}`);
   console.log(`  Course ratings: ${countRows(schema.courseRatings)}`);
   console.log(`  Lesson comments: ${countRows(schema.comments)}`);
+  console.log(`  Bookmarks: ${countRows(schema.bookmarks)}, Notes: ${countRows(schema.notes)}`);
   console.log(
     `  Lesson progress: ${countRows(schema.lessonProgress)} (${countRows(schema.lessonProgress, eq(schema.lessonProgress.status, LessonProgressStatus.Completed))} completed)`
   );
