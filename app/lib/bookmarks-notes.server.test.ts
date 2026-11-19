@@ -1,3 +1,10 @@
+import { enrollStudent } from "./enrollments.server";
+import {
+  fixtureModule,
+  fixtureLesson,
+  fixturePerson,
+  fixturePurchase,
+} from "~/test/fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -22,30 +29,26 @@ let otherStudent: typeof schema.users.$inferSelect;
 beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
-  const module = db
-    .insert(schema.modules)
-    .values({ courseId: base.course.id, title: "Basics", position: 1 })
-    .returning()
-    .get();
-  firstLesson = db
-    .insert(schema.lessons)
-    .values({ moduleId: module.id, title: "First lesson", position: 1 })
-    .returning()
-    .get();
-  secondLesson = db
-    .insert(schema.lessons)
-    .values({ moduleId: module.id, title: "Second lesson", position: 2 })
-    .returning()
-    .get();
-  otherStudent = db
-    .insert(schema.users)
-    .values({
-      name: "Another Student",
-      email: "another@example.com",
-      role: schema.UserRole.Student,
-    })
-    .returning()
-    .get();
+  const module = fixtureModule(db, {
+    courseId: base.course.id,
+    title: "Basics",
+    position: 1,
+  });
+  firstLesson = fixtureLesson(db, {
+    moduleId: module.id,
+    title: "First lesson",
+    position: 1,
+  });
+  secondLesson = fixtureLesson(db, {
+    moduleId: module.id,
+    title: "Second lesson",
+    position: 2,
+  });
+  otherStudent = fixturePerson(db, {
+    name: "Another Student",
+    email: "another@example.com",
+    role: schema.UserRole.Student,
+  });
 });
 
 afterEach(() => db.$client.close());
@@ -117,15 +120,11 @@ describe("Bookmarks and Notes", () => {
       savedBookmarks: [],
       savedNotes: [],
     });
-    const platformAdmin = db
-      .insert(schema.users)
-      .values({
-        name: "Platform Admin",
-        email: "admin@example.com",
-        role: schema.UserRole.Admin,
-      })
-      .returning()
-      .get();
+    const platformAdmin = fixturePerson(db, {
+      name: "Platform Admin",
+      email: "admin@example.com",
+      role: schema.UserRole.Admin,
+    });
     expect(getSavedLessons(db, platformAdmin.id)).toEqual({
       savedBookmarks: [],
       savedNotes: [],
@@ -181,28 +180,20 @@ describe("Bookmarks and Notes", () => {
 
   it("keeps Bookmarks and Notes after an approved Refund so a returning Student can recover them", async () => {
     const notifications = fakeNotifications();
-    const platformAdmin = db
-      .insert(schema.users)
-      .values({
-        name: "Platform Admin",
-        email: "admin@example.com",
-        role: schema.UserRole.Admin,
-      })
-      .returning()
-      .get();
-    const purchase = db
-      .insert(schema.purchases)
-      .values({
-        userId: base.user.id,
-        courseId: base.course.id,
-        amountPaid: 7900,
-        createdAt: NOW.toISOString(),
-      })
-      .returning()
-      .get();
-    db.insert(schema.enrollments)
-      .values({ userId: base.user.id, courseId: base.course.id })
-      .run();
+    const platformAdmin = fixturePerson(db, {
+      name: "Platform Admin",
+      email: "admin@example.com",
+      role: schema.UserRole.Admin,
+    });
+    const purchase = fixturePurchase(db, {
+      userId: base.user.id,
+      courseId: base.course.id,
+      amountPaid: 7900,
+      createdAt: NOW.toISOString(),
+    });
+    expect(
+      await enrollStudent(db, base.user.id, base.course.id, NOW, notifications)
+    ).toMatchObject({ ok: true });
     toggleBookmark(db, base.user.id, firstLesson.id, NOW);
     saveNote(db, base.user.id, firstLesson.id, "Keep for later", NOW);
     const before = getSavedLessons(db, base.user.id);
@@ -228,9 +219,15 @@ describe("Bookmarks and Notes", () => {
     ).toMatchObject({ ok: true });
     expect(getSavedLessons(db, base.user.id)).toEqual(before);
     // The refund removed Enrollment; a fresh Enrollment restores the same data.
-    db.insert(schema.enrollments)
-      .values({ userId: base.user.id, courseId: base.course.id })
-      .run();
+    expect(
+      await enrollStudent(
+        db,
+        base.user.id,
+        base.course.id,
+        LATEST,
+        notifications
+      )
+    ).toMatchObject({ ok: true });
     expect(getLessonSavedState(db, base.user.id, firstLesson.id)).toMatchObject(
       { bookmarked: true, note: { body: "Keep for later" } }
     );

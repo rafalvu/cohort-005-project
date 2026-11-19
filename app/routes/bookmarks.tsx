@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import type { Route } from "./+types/saved";
+import type { Route } from "./+types/bookmarks";
 import { db } from "~/db";
 import { getAccess, requireUserId } from "~/lib/access.server";
 import { getSavedLessons } from "~/lib/bookmarks-notes.server";
@@ -9,7 +9,7 @@ import { formatRelativeTime } from "~/lib/utils";
 
 export function meta() {
   return [
-    { title: "Saved — Cadence" },
+    { title: "Bookmarks and Notes — Cadence" },
     { name: "description", content: "Your bookmarks and notes" },
   ];
 }
@@ -38,13 +38,13 @@ export async function loader({ request }: Route.LoaderArgs) {
   };
 }
 
-export default function Saved({ loaderData }: Route.ComponentProps) {
+export default function Bookmarks({ loaderData }: Route.ComponentProps) {
   const { savedBookmarks, savedNotes } = loaderData;
 
   return (
     <div className="p-6">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Saved</h1>
+        <h1 className="text-2xl font-bold">Bookmarks and Notes</h1>
         <p className="text-sm text-muted-foreground">
           The lessons you flagged, and what you wrote about them.
         </p>

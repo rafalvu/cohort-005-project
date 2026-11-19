@@ -1,3 +1,9 @@
+import {
+  fixturePerson,
+  fixtureTeam,
+  fixturePurchase,
+  fixtureSeat,
+} from "~/test/fixtures";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -23,41 +29,29 @@ beforeEach(() => {
   base = seedBaseData(db);
   notifications = fakeNotifications();
 
-  teamAdmin = db
-    .insert(schema.users)
-    .values({
-      name: "Tess Admin",
-      email: "tess@example.com",
-      role: schema.UserRole.Student,
-    })
-    .returning()
-    .get();
+  teamAdmin = fixturePerson(db, {
+    name: "Tess Admin",
+    email: "tess@example.com",
+    role: schema.UserRole.Student,
+  });
 });
 
 function buySeats(seats: number, country: string | null = null) {
-  const team = db.insert(schema.teams).values({}).returning().get();
-  const purchase = db
-    .insert(schema.purchases)
-    .values({
-      userId: teamAdmin.id,
-      courseId: base.course.id,
-      amountPaid: 7900 * seats,
-      country,
-      createdAt: NOW.toISOString(),
-    })
-    .returning()
-    .get();
+  const team = fixtureTeam(db);
+  const purchase = fixturePurchase(db, {
+    userId: teamAdmin.id,
+    courseId: base.course.id,
+    amountPaid: 7900 * seats,
+    country,
+    createdAt: NOW.toISOString(),
+  });
   const seatRows = Array.from({ length: seats }, (_, i) =>
-    db
-      .insert(schema.coupons)
-      .values({
-        teamId: team.id,
-        courseId: base.course.id,
-        code: `SEAT-${purchase.id}-${i}`,
-        purchaseId: purchase.id,
-      })
-      .returning()
-      .get()
+    fixtureSeat(db, {
+      teamId: team.id,
+      courseId: base.course.id,
+      code: `SEAT-${purchase.id}-${i}`,
+      purchaseId: purchase.id,
+    })
   );
   return { purchase, seats: seatRows };
 }
@@ -350,15 +344,11 @@ function sentOfKind(kind: string) {
 }
 
 function addStudent(name: string) {
-  return db
-    .insert(schema.users)
-    .values({
-      name,
-      email: `${name.toLowerCase()}@example.com`,
-      role: schema.UserRole.Student,
-    })
-    .returning()
-    .get();
+  return fixturePerson(db, {
+    name,
+    email: `${name.toLowerCase()}@example.com`,
+    role: schema.UserRole.Student,
+  });
 }
 
 async function raise(purchaseId: number) {

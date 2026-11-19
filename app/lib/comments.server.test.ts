@@ -1,3 +1,4 @@
+import { fixtureModule, fixtureLesson, fixturePerson } from "~/test/fixtures";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData } from "~/test/setup";
 import * as schema from "~/db/schema";
@@ -24,18 +25,18 @@ beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
 
-  const module = db
-    .insert(schema.modules)
-    .values({ courseId: base.course.id, title: "Basics", position: 1 })
-    .returning()
-    .get();
+  const module = fixtureModule(db, {
+    courseId: base.course.id,
+    title: "Basics",
+    position: 1,
+  });
   moduleId = module.id;
 
-  lessonId = db
-    .insert(schema.lessons)
-    .values({ moduleId: module.id, title: "Lesson 1", position: 1 })
-    .returning()
-    .get().id;
+  lessonId = fixtureLesson(db, {
+    moduleId: module.id,
+    title: "Lesson 1",
+    position: 1,
+  }).id;
 });
 
 describe("creating a comment", () => {
@@ -158,11 +159,11 @@ describe("creating a comment", () => {
   });
 
   it("refuses a reply to a comment on a different lesson", async () => {
-    const otherLessonId = db
-      .insert(schema.lessons)
-      .values({ moduleId: moduleId, title: "Lesson 2", position: 2 })
-      .returning()
-      .get().id;
+    const otherLessonId = fixtureLesson(db, {
+      moduleId: moduleId,
+      title: "Lesson 2",
+      position: 2,
+    }).id;
     const question = await post(null, otherLessonId);
 
     expect(
@@ -315,15 +316,11 @@ describe("the Discussion Question Notification", () => {
   });
 
   it("tells the Instructor when a Platform Admin asks", async () => {
-    const admin = db
-      .insert(schema.users)
-      .values({
-        name: "Ada Admin",
-        email: "ada@example.com",
-        role: schema.UserRole.Admin,
-      })
-      .returning()
-      .get();
+    const admin = fixturePerson(db, {
+      name: "Ada Admin",
+      email: "ada@example.com",
+      role: schema.UserRole.Admin,
+    });
 
     await postAs(admin.id, null, "Is this lesson up to date?");
 
@@ -391,15 +388,11 @@ describe("deleting a comment", () => {
 
   it("refuses anyone else who is not staff", async () => {
     const question = await post(null);
-    const otherStudent = db
-      .insert(schema.users)
-      .values({
-        name: "Ben",
-        email: "ben@example.com",
-        role: schema.UserRole.Student,
-      })
-      .returning()
-      .get();
+    const otherStudent = fixturePerson(db, {
+      name: "Ben",
+      email: "ben@example.com",
+      role: schema.UserRole.Student,
+    });
 
     expect(
       await deleteComment(
@@ -635,15 +628,11 @@ async function postAs(authorId: number, parentId: number | null, body: string) {
 }
 
 function addLearner(name: string) {
-  return db
-    .insert(schema.users)
-    .values({
-      name,
-      email: `${name.toLowerCase()}@example.com`,
-      role: schema.UserRole.Student,
-    })
-    .returning()
-    .get();
+  return fixturePerson(db, {
+    name,
+    email: `${name.toLowerCase()}@example.com`,
+    role: schema.UserRole.Student,
+  });
 }
 
 function sentOf<K extends NotificationKind>(kind: K) {
