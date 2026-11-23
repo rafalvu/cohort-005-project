@@ -36,3 +36,21 @@ first time the code changes.
 Test setup calls the module's own functions. When the function you need does
 not exist, add it to the module rather than inserting rows directly, so a
 change to how the module stores its data leaves its tests alone.
+
+## Keep database queries behind the module's interface
+
+Once behaviour belongs to a module, routes call its public entry points rather
+than querying its tables themselves. Import modules through their root files;
+implementation subfolders are private. Follow the layout and test-import rules
+in [app/modules/README.md](./app/modules/README.md).
+
+Instructor analytics receives its database as an argument. Its implementation
+may import schema definitions, but must not import the global database from
+`~/db` or an equivalent relative path. The analytics route currently imports
+`db` only to pass it to `getInstructorAnalytics`; that wiring does not permit
+adding analytics queries to the route.
+
+During review, check both which files a dependency-cruiser rule covers and how
+the imported dependency is used. Run `npm run lint:boundaries` after changing
+imports; these rules are command-line checks, not TypeScript or editor
+restrictions. A passing check does not replace reviewing query ownership.

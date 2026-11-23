@@ -1,0 +1,15 @@
+export {
+  getInstructorAnalytics,
+  type AnalyticsDb,
+  type AnalyticsViewer,
+  type AnalyticsInput,
+  type InstructorAnalyticsData,
+  type RevenueSeries,
+  type TopBuyer,
+  type CourseProgressSummary,
+  type FunnelLesson,
+  type CourseFunnel,
+  type QuizPassRate,
+  type CourseCountryRevenue,
+  type RefundExposure,
+} from "./lib/instructor-analytics.server";
