@@ -37,6 +37,16 @@ module.exports = {
       to: { path: "^app/db/index\\.ts$" },
     },
     {
+      name: "lesson-operations-no-global-db",
+      comment: "Lesson operations receive the database from their caller.",
+      severity: "error",
+      from: {
+        path: `^${R}/lesson-operations/`,
+        pathNot: `^${R}/lesson-operations/tests/`,
+      },
+      to: { path: "^app/db/index\\.ts$" },
+    },
+    {
       name: "course-permissions-no-global-db",
       comment:
         "Course permissions receive the database from their caller; the global application database is not a dependency.",

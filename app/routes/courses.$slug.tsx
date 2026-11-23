@@ -87,7 +87,7 @@ function getCourseWithDetails(id: number) {
   if (!course) return null;
 
   const courseModules = db
-    .select()
+    .select({ id: modules.id, title: modules.title })
     .from(modules)
     .where(eq(modules.courseId, id))
     .orderBy(modules.position)
@@ -98,7 +98,12 @@ function getCourseWithDetails(id: number) {
   const courseLessons =
     moduleIds.length > 0
       ? db
-          .select()
+          .select({
+            id: lessons.id,
+            moduleId: lessons.moduleId,
+            title: lessons.title,
+            durationMinutes: lessons.durationMinutes,
+          })
           .from(lessons)
           .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
           .orderBy(lessons.position)
@@ -108,8 +113,15 @@ function getCourseWithDetails(id: number) {
   return {
     ...course,
     modules: courseModules.map((mod) => ({
-      ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
+      id: mod.id,
+      title: mod.title,
+      lessons: courseLessons
+        .filter((lesson) => lesson.moduleId === mod.id)
+        .map((lesson) => ({
+          id: lesson.id,
+          title: lesson.title,
+          durationMinutes: lesson.durationMinutes,
+        })),
     })),
   };
 }
