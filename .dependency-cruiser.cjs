@@ -27,6 +27,17 @@ const PACKAGE_INTERNALS = `^${R}/[^/]+/[^/]+/`;
 module.exports = {
   forbidden: [
     {
+      name: "course-permissions-no-global-db",
+      comment:
+        "Course permissions receive the database from their caller; the global application database is not a dependency.",
+      severity: "error",
+      from: {
+        path: `^${R}/course-permissions/`,
+        pathNot: `^${R}/course-permissions/tests/`,
+      },
+      to: { path: "^app/db/index\\.ts$" },
+    },
+    {
       name: "instructor-analytics-no-global-db",
       comment:
         "Instructor analytics receives its database from the caller. Schema imports are allowed, but importing the application database instance is not.",
@@ -75,7 +86,8 @@ module.exports = {
     },
     {
       name: "no-circular",
-      comment: "No dependency cycles. Scope to `^${R}/` if you want to allow cycles outside packages.",
+      comment:
+        "No dependency cycles. Scope to `^${R}/` if you want to allow cycles outside packages.",
       severity: "error",
       from: {},
       to: { circular: true },
