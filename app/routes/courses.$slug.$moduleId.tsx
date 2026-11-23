@@ -12,7 +12,7 @@ import {
   users,
   LessonProgressStatus,
 } from "~/db/schema";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -70,7 +70,7 @@ function getCourseWithDetails(id: number) {
   if (!course) return null;
 
   const courseModules = db
-    .select()
+    .select({ id: modules.id, title: modules.title })
     .from(modules)
     .where(eq(modules.courseId, id))
     .orderBy(modules.position)
@@ -81,7 +81,12 @@ function getCourseWithDetails(id: number) {
   const courseLessons =
     moduleIds.length > 0
       ? db
-          .select()
+          .select({
+            id: lessons.id,
+            moduleId: lessons.moduleId,
+            title: lessons.title,
+            durationMinutes: lessons.durationMinutes,
+          })
           .from(lessons)
           .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
           .orderBy(lessons.position)
@@ -91,8 +96,15 @@ function getCourseWithDetails(id: number) {
   return {
     ...course,
     modules: courseModules.map((mod) => ({
-      ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
+      id: mod.id,
+      title: mod.title,
+      lessons: courseLessons
+        .filter((lesson) => lesson.moduleId === mod.id)
+        .map((lesson) => ({
+          id: lesson.id,
+          title: lesson.title,
+          durationMinutes: lesson.durationMinutes,
+        })),
     })),
   };
 }
@@ -102,13 +114,26 @@ function getModuleWithLessons(id: number) {
   if (!mod) return null;
 
   const moduleLessons = db
-    .select()
+    .select({
+      id: lessons.id,
+      title: lessons.title,
+      durationMinutes: lessons.durationMinutes,
+      hasVideo:
+        sql<boolean>`case when ${lessons.videoUrl} is not null and ${lessons.videoUrl} != '' then 1 else 0 end`.mapWith(
+          Boolean
+        ),
+    })
     .from(lessons)
     .where(eq(lessons.moduleId, id))
     .orderBy(lessons.position)
     .all();
 
-  return { ...mod, lessons: moduleLessons };
+  return {
+    id: mod.id,
+    title: mod.title,
+    courseId: mod.courseId,
+    lessons: moduleLessons,
+  };
 }
 
 function isUserEnrolled(userId: number, courseId: number) {
@@ -358,7 +383,7 @@ export default function ModuleDetail({ loaderData }: Route.ComponentProps) {
             const status = lessonProgressMap[lesson.id];
             const isCompleted = status === LessonProgressStatus.Completed;
             const isInProgress = status === LessonProgressStatus.InProgress;
-            const hasVideo = !!lesson.videoUrl;
+            const hasVideo = !!lesson.hasVideo;
 
             const content = (
               <div className="flex items-center gap-3 rounded-md px-3 py-3 text-sm">
