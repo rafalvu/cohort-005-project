@@ -8,23 +8,21 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import type { Route } from "./+types/instructor.$courseId";
-import { getCurrentUserId } from "~/lib/session";
+import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
+import {
+  getCourseEditor,
+  updateCourseSettings,
+  createCourseSection,
+  renameCourseSection,
+  deleteCourseSection,
+  reorderCourseSections,
+} from "~/modules/instructor-operations/course-editor.server";
+import { defaultNotifications } from "~/lib/notifications.server";
 import { markdown } from "~/lib/text";
 import { CourseStatus, UserRole } from "~/db/schema";
 import { db } from "~/db";
-import {
-  courses,
-  categories,
-  users,
-  modules,
-  lessons,
-  enrollments,
-  lessonProgress,
-  LessonProgressStatus,
-  quizzes,
-  quizAttempts,
-} from "~/db/schema";
-import { eq, and, or, sql, desc, gt, gte } from "drizzle-orm";
+import { courses, modules, lessons } from "~/db/schema";
+import { eq, and, sql, gt, gte } from "drizzle-orm";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -60,197 +58,12 @@ import { data, isRouteErrorResponse } from "react-router";
 import { z } from "zod";
 import { parseFormData, parseParams } from "~/lib/validation";
 
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
 function getCourseById(id: number) {
   return db.select().from(courses).where(eq(courses.id, id)).get();
 }
 
-function getCourseWithDetails(id: number) {
-  const course = db
-    .select({
-      id: courses.id,
-      title: courses.title,
-      slug: courses.slug,
-      description: courses.description,
-      salesCopy: courses.salesCopy,
-      instructorId: courses.instructorId,
-      categoryId: courses.categoryId,
-      status: courses.status,
-      coverImageUrl: courses.coverImageUrl,
-      price: courses.price,
-      pppEnabled: courses.pppEnabled,
-      createdAt: courses.createdAt,
-      updatedAt: courses.updatedAt,
-      instructorName: users.name,
-      instructorAvatarUrl: users.avatarUrl,
-      instructorBio: users.bio,
-      categoryName: categories.name,
-    })
-    .from(courses)
-    .innerJoin(users, eq(courses.instructorId, users.id))
-    .innerJoin(categories, eq(courses.categoryId, categories.id))
-    .where(eq(courses.id, id))
-    .get();
-
-  if (!course) return null;
-
-  const courseModules = db
-    .select()
-    .from(modules)
-    .where(eq(modules.courseId, id))
-    .orderBy(modules.position)
-    .all();
-
-  const moduleIds = courseModules.map((m) => m.id);
-
-  const courseLessons =
-    moduleIds.length > 0
-      ? db
-          .select()
-          .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
-          .orderBy(lessons.position)
-          .all()
-      : [];
-
-  return {
-    ...course,
-    modules: courseModules.map((mod) => ({
-      ...mod,
-      lessons: courseLessons.filter((l) => l.moduleId === mod.id),
-    })),
-  };
-}
-
-function getLessonCountForCourse(courseId: number) {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return 0;
-
-  const count = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
-    .get();
-
-  return count?.count ?? 0;
-}
-
-function updateCourse(id: number, title: string, description: string) {
-  return db
-    .update(courses)
-    .set({ title, description, updatedAt: new Date().toISOString() })
-    .where(eq(courses.id, id))
-    .returning()
-    .get();
-}
-
-function updateCourseStatus(id: number, status: CourseStatus) {
-  return db
-    .update(courses)
-    .set({ status, updatedAt: new Date().toISOString() })
-    .where(eq(courses.id, id))
-    .returning()
-    .get();
-}
-
-function updateCourseSalesCopy(id: number, salesCopy: string) {
-  if (salesCopy.trim().length === 0) {
-    throw new Error("Sales copy cannot be empty");
-  }
-
-  return db
-    .update(courses)
-    .set({
-      salesCopy: markdown(salesCopy),
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(courses.id, id))
-    .returning()
-    .get();
-}
-
-function updateCoursePrice(id: number, price: number) {
-  return db
-    .update(courses)
-    .set({ price, updatedAt: new Date().toISOString() })
-    .where(eq(courses.id, id))
-    .returning()
-    .get();
-}
-
-function updateCoursePppEnabled(id: number, pppEnabled: boolean) {
-  return db
-    .update(courses)
-    .set({ pppEnabled, updatedAt: new Date().toISOString() })
-    .where(eq(courses.id, id))
-    .returning()
-    .get();
-}
-
 function getModuleById(id: number) {
   return db.select().from(modules).where(eq(modules.id, id)).get();
-}
-
-function getModulesByCourse(courseId: number) {
-  return db
-    .select()
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .orderBy(modules.position)
-    .all();
-}
-
-function createModule(
-  courseId: number,
-  title: string,
-  position: number | null
-) {
-  const pos =
-    position ??
-    db
-      .select({ max: sql<number>`coalesce(max(${modules.position}), 0)` })
-      .from(modules)
-      .where(eq(modules.courseId, courseId))
-      .get()!.max + 1;
-
-  return db
-    .insert(modules)
-    .values({ courseId, title, position: pos })
-    .returning()
-    .get();
-}
-
-function updateModuleTitle(id: number, title: string) {
-  return db
-    .update(modules)
-    .set({ title })
-    .where(eq(modules.id, id))
-    .returning()
-    .get();
-}
-
-function deleteModule(id: number) {
-  // Delete all lessons in this module first
-  db.delete(lessons).where(eq(lessons.moduleId, id)).run();
-  return db.delete(modules).where(eq(modules.id, id)).returning().get();
-}
-
-function reorderModules(courseId: number, moduleIds: number[]) {
-  for (let i = 0; i < moduleIds.length; i++) {
-    db.update(modules)
-      .set({ position: i + 1 })
-      .where(and(eq(modules.id, moduleIds[i]), eq(modules.courseId, courseId)))
-      .run();
-  }
-  return getModulesByCourse(courseId);
 }
 
 function getLessonById(id: number) {
@@ -360,157 +173,11 @@ function moveLessonToModule(
     .get();
 }
 
-function getEnrollmentCountForCourse(courseId: number) {
-  const result = db
-    .select({ count: sql<number>`count(*)` })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .get();
-
-  return result?.count ?? 0;
-}
-
-function getCourseEnrolledStudents(courseId: number) {
-  return db
-    .select({
-      enrollmentId: enrollments.id,
-      userId: enrollments.userId,
-      enrolledAt: enrollments.enrolledAt,
-      completedAt: enrollments.completedAt,
-    })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .all();
-}
-
-function getCourseLessonIds(courseId: number): number[] {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return [];
-
-  const courseLessons = db
-    .select({ id: lessons.id })
-    .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
-    .all();
-
-  return courseLessons.map((l) => l.id);
-}
-
-function calculateProgress(
-  userId: number,
-  courseId: number,
-  weightByDuration: boolean
-) {
-  const lessonIds = getCourseLessonIds(courseId);
-
-  if (lessonIds.length === 0) return 0;
-
-  if (weightByDuration) {
-    const courseLessons = db
-      .select({
-        id: lessons.id,
-        durationMinutes: lessons.durationMinutes,
-      })
-      .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
-      .all();
-
-    const totalDuration = courseLessons.reduce(
-      (sum, l) => sum + (l.durationMinutes ?? 1),
-      0
-    );
-
-    if (totalDuration === 0) return 0;
-
-    const completed = db
-      .select()
-      .from(lessonProgress)
-      .where(
-        and(
-          eq(lessonProgress.userId, userId),
-          eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
-        )
-      )
-      .all();
-
-    const completedIds = new Set(completed.map((p) => p.lessonId));
-
-    const completedDuration = courseLessons
-      .filter((l) => completedIds.has(l.id))
-      .reduce((sum, l) => sum + (l.durationMinutes ?? 1), 0);
-
-    return Math.round((completedDuration / totalDuration) * 100);
-  }
-
-  const completedCount = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
-      )
-    )
-    .get();
-
-  return Math.round(((completedCount?.count ?? 0) / lessonIds.length) * 100);
-}
-
-function getQuizByLessonId(lessonId: number) {
-  return db.select().from(quizzes).where(eq(quizzes.lessonId, lessonId)).get();
-}
-
-function getBestAttempt(userId: number, quizId: number) {
-  return db
-    .select()
-    .from(quizAttempts)
-    .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
-    )
-    .orderBy(desc(quizAttempts.score))
-    .limit(1)
-    .get();
-}
-
 const courseEditorParamsSchema = z.object({
   courseId: z.coerce.number().int(),
 });
 
 const courseEditorActionSchema = z.discriminatedUnion("intent", [
-  z.object({
-    intent: z.literal("update-title"),
-    title: z.string().trim().min(1, "Title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("update-description"),
-    description: z.string().trim().min(1, "Description cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("update-status"),
-    status: z.nativeEnum(CourseStatus),
-  }),
-  z.object({ intent: z.literal("update-price"), price: z.string() }),
-  z.object({ intent: z.literal("update-ppp-enabled"), pppEnabled: z.string() }),
-  z.object({
-    intent: z.literal("add-module"),
-    title: z.string().trim().min(1, "Module title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("rename-module"),
-    moduleId: z.coerce.number().int(),
-    title: z.string().trim().min(1, "Module title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("delete-module"),
-    moduleId: z.coerce.number().int(),
-  }),
   z.object({
     intent: z.literal("add-lesson"),
     moduleId: z.coerce.number().int(),
@@ -520,10 +187,6 @@ const courseEditorActionSchema = z.discriminatedUnion("intent", [
     intent: z.literal("rename-lesson"),
     lessonId: z.coerce.number().int(),
     title: z.string().trim().min(1, "Lesson title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("reorder-modules"),
-    moduleIds: z.string().min(1, "Missing module IDs."),
   }),
   z.object({
     intent: z.literal("reorder-lessons"),
@@ -540,10 +203,6 @@ const courseEditorActionSchema = z.discriminatedUnion("intent", [
     intent: z.literal("delete-lesson"),
     lessonId: z.coerce.number().int(),
   }),
-  z.object({
-    intent: z.literal("update-sales-copy"),
-    salesCopy: z.string().trim().min(1, "Sales copy cannot be empty."),
-  }),
 ]);
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -555,109 +214,54 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to manage courses.", {
-      status: 401,
-    });
-  }
-
-  const user = getUserById(currentUserId);
-
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
-    throw data("Only instructors and admins can access this page.", {
-      status: 403,
-    });
-  }
-
-  const courseId = parseInt(params.courseId, 10);
-  if (isNaN(courseId)) {
-    throw data("Invalid course ID.", { status: 400 });
-  }
-
-  const course = getCourseWithDetails(courseId);
-
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  if (course.instructorId !== currentUserId && user.role !== UserRole.Admin) {
-    throw data("You can only edit your own courses.", { status: 403 });
-  }
-
-  const lessonCount = getLessonCountForCourse(courseId);
-  const enrollmentCount = getEnrollmentCountForCourse(courseId);
-
-  // Student roster data
-  const enrolledStudents = getCourseEnrolledStudents(courseId);
-
-  // Gather all lessons from the course modules and find which have quizzes
-  const allCourseLessons = course.modules.flatMap((mod) => mod.lessons);
-  const lessonQuizzes: {
-    lessonId: number;
-    lessonTitle: string;
-    quizId: number;
-    quizTitle: string;
-  }[] = [];
-  for (const lesson of allCourseLessons) {
-    const quiz = getQuizByLessonId(lesson.id);
-    if (quiz) {
-      lessonQuizzes.push({
-        lessonId: lesson.id,
-        lessonTitle: lesson.title,
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-      });
-    }
-  }
-
-  const students = enrolledStudents.map((enrollment) => {
-    const studentUser = getUserById(enrollment.userId);
-    const progress = calculateProgress(enrollment.userId, courseId, false);
-
-    const quizScores = lessonQuizzes.map((lq) => {
-      const bestAttempt = getBestAttempt(enrollment.userId, lq.quizId);
-      return {
-        quizId: lq.quizId,
-        quizTitle: lq.quizTitle,
-        lessonTitle: lq.lessonTitle,
-        bestScore: bestAttempt?.score ?? null,
-        passed: bestAttempt?.passed ?? null,
-      };
-    });
-
-    return {
-      userId: enrollment.userId,
-      name: studentUser?.name ?? "Unknown",
-      email: studentUser?.email ?? "",
-      enrolledAt: enrollment.enrolledAt,
-      completedAt: enrollment.completedAt,
-      progress,
-      quizScores,
-    };
-  });
-
-  const quizCount = lessonQuizzes.length;
-
-  return { course, lessonCount, enrollmentCount, students, quizCount };
+  return getCourseEditor(db, request, params.courseId);
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("You must be logged in.", { status: 401 });
+  const user = await requireCurrentPerson(db, request);
+  const currentUserId = user.id;
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    throw data("Invalid form data.", { status: 400 });
+  }
+  if ([...formData.keys()].some((key) => formData.getAll(key).length > 1)) {
+    throw data("Duplicate form fields.", { status: 400 });
+  }
+  const command = Object.fromEntries(formData);
+  switch (command.intent) {
+    case "update-title":
+    case "update-description":
+    case "update-status":
+    case "update-price":
+    case "update-ppp-enabled":
+    case "update-sales-copy":
+      return updateCourseSettings(db, request, params.courseId, command);
+    case "add-module":
+      return createCourseSection(db, request, params.courseId, command);
+    case "rename-module":
+      return renameCourseSection(db, request, params.courseId, command);
+    case "delete-module":
+      return deleteCourseSection(
+        db,
+        request,
+        params.courseId,
+        command,
+        await defaultNotifications()
+      );
+    case "reorder-modules":
+      return reorderCourseSections(db, request, params.courseId, command);
   }
 
-  const user = getUserById(currentUserId);
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
+  const parsed = parseFormData(formData, courseEditorActionSchema);
+  if (!parsed.success) {
+    throw data(Object.values(parsed.errors)[0] ?? "Invalid input.", {
+      status: 400,
+    });
+  }
+
+  if (user.role !== UserRole.Instructor && user.role !== UserRole.Admin) {
     throw data("Only instructors and admins can edit courses.", {
       status: 403,
     });
@@ -674,85 +278,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("You can only edit your own courses.", { status: 403 });
   }
 
-  const formData = await request.formData();
-  const parsed = parseFormData(formData, courseEditorActionSchema);
-
-  if (!parsed.success) {
-    return data(
-      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
-      { status: 400 }
-    );
-  }
-
   const { intent } = parsed.data;
-
-  if (intent === "update-title") {
-    updateCourse(courseId, parsed.data.title, course.description);
-    return { success: true, field: "title" };
-  }
-
-  if (intent === "update-description") {
-    updateCourse(courseId, course.title, parsed.data.description);
-    return { success: true, field: "description" };
-  }
-
-  if (intent === "update-status") {
-    updateCourseStatus(courseId, parsed.data.status);
-    return { success: true, field: "status" };
-  }
-
-  if (intent === "update-price") {
-    const priceDollars = parseFloat(parsed.data.price);
-    if (isNaN(priceDollars) || priceDollars < 0) {
-      return data(
-        { error: "Price must be a non-negative number." },
-        { status: 400 }
-      );
-    }
-    if (priceDollars > 9999.99) {
-      return data({ error: "Price cannot exceed $9,999.99." }, { status: 400 });
-    }
-    const priceCents = Math.round(priceDollars * 100);
-    updateCoursePrice(courseId, priceCents);
-    return { success: true, field: "price" };
-  }
-
-  if (intent === "update-ppp-enabled") {
-    const pppEnabled = parsed.data.pppEnabled === "true";
-    updateCoursePppEnabled(courseId, pppEnabled);
-    return { success: true, field: "ppp-enabled" };
-  }
-
-  if (intent === "add-module") {
-    createModule(courseId, parsed.data.title, null);
-    return { success: true, field: "module" };
-  }
-
-  if (intent === "rename-module") {
-    const { moduleId, title } = parsed.data;
-    const mod = getModuleById(moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Module not found in this course." },
-        { status: 404 }
-      );
-    }
-    updateModuleTitle(moduleId, title);
-    return { success: true, field: "module" };
-  }
-
-  if (intent === "delete-module") {
-    const { moduleId } = parsed.data;
-    const mod = getModuleById(moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Module not found in this course." },
-        { status: 404 }
-      );
-    }
-    deleteModule(moduleId);
-    return { success: true, field: "module" };
-  }
 
   if (intent === "add-lesson") {
     const { moduleId, title } = parsed.data;
@@ -782,12 +308,6 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     updateLessonTitle(lessonId, title);
     return { success: true, field: "lesson" };
-  }
-
-  if (intent === "reorder-modules") {
-    const moduleIds: number[] = JSON.parse(parsed.data.moduleIds);
-    reorderModules(courseId, moduleIds);
-    return { success: true, field: "module-reorder" };
   }
 
   if (intent === "reorder-lessons") {
@@ -843,11 +363,6 @@ export async function action({ params, request }: Route.ActionArgs) {
     }
     deleteLesson(lessonId);
     return { success: true, field: "lesson" };
-  }
-
-  if (intent === "update-sales-copy") {
-    updateCourseSalesCopy(courseId, parsed.data.salesCopy);
-    return { success: true, field: "sales-copy" };
   }
 
   throw data("Invalid action.", { status: 400 });
