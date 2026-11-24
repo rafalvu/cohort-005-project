@@ -2,26 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
-import { requireContentAccess } from "~/lib/access.server";
-import {
-  createComment,
-  deleteComment,
-  editComment,
-} from "~/lib/comments.server";
 import { defaultNotifications } from "~/lib/notifications.server";
-import { toggleBookmark } from "~/lib/bookmarks.server";
-import { saveNote } from "~/lib/notes.server";
-import { MAX_NOTE_LENGTH } from "~/lib/notes";
 import { CommentThread } from "~/components/comment-thread";
 import { db } from "~/db";
-import {
-  comments,
-  courses,
-  lessons,
-  modules,
-  LessonProgressStatus,
-} from "~/db/schema";
-import { eq } from "drizzle-orm";
+import { LessonProgressStatus } from "~/db/schema";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
@@ -47,73 +31,12 @@ import {
 import { cn, formatDuration, formatRelativeTime } from "~/lib/utils";
 import { getLessonPage } from "~/modules/lesson-operations/index.server";
 import { completeLesson } from "~/modules/lesson-operations/activity.server";
+import { updateLessonDiscussion } from "~/modules/lesson-operations/discussions.server";
+import { updateLessonPersonalData } from "~/modules/lesson-operations/personal.server";
 import { submitQuiz } from "~/modules/lesson-operations/quizzes.server";
 import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
-import { parseFormData, parseParams } from "~/lib/validation";
-
-const lessonParamsSchema = z.object({
-  slug: z.string().min(1),
-  lessonId: z.coerce.number().int(),
-});
-
-const createCommentSchema = z.object({
-  intent: z.literal("create-comment"),
-  body: z.string(),
-  parentId: z.coerce.number().int().optional(),
-});
-
-const editCommentSchema = z.object({
-  intent: z.literal("edit-comment"),
-  commentId: z.coerce.number().int(),
-  body: z.string(),
-});
-
-const saveNoteSchema = z.object({
-  body: z
-    .string()
-    .trim()
-    .min(1, "Write something before saving your note.")
-    .max(
-      MAX_NOTE_LENGTH,
-      `Your note is over ${MAX_NOTE_LENGTH.toLocaleString("en")} characters, so it was not saved.`
-    ),
-});
-
-const deleteCommentSchema = z.object({
-  intent: z.literal("delete-comment"),
-  commentId: z.coerce.number().int(),
-});
-
-function getCourseBySlug(slug: string) {
-  return db.select().from(courses).where(eq(courses.slug, slug)).get();
-}
-
-function getLessonById(id: number) {
-  return db.select().from(lessons).where(eq(lessons.id, id)).get();
-}
-
-function getModuleById(id: number) {
-  return db.select().from(modules).where(eq(modules.id, id)).get();
-}
-
-/**
- * Throws 404 unless the lesson is in the course, so content access to one
- * course can't reach a lesson in another by posting its id to this route.
- */
-function requireLessonInCourse(lessonId: number, courseId: number) {
-  const lesson = getLessonById(lessonId);
-  const mod = lesson ? getModuleById(lesson.moduleId) : undefined;
-  if (!mod || mod.courseId !== courseId) {
-    throw data("Lesson not found in this course", { status: 404 });
-  }
-}
-
-function getCommentById(commentId: number) {
-  return db.select().from(comments).where(eq(comments.id, commentId)).get();
-}
 
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.lesson?.title ?? "Lesson";
@@ -126,7 +49,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  const person = await requireCurrentPerson(db, request);
+  await requireCurrentPerson(db, request);
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -141,120 +64,21 @@ export async function action({ params, request }: Route.ActionArgs) {
     return completeLesson(db, request, params, formData);
   }
 
-  const { slug, lessonId } = parseParams(params, lessonParamsSchema);
-  const course = getCourseBySlug(slug);
-  if (!course) {
-    throw data("Course not found", { status: 404 });
-  }
-  const currentUserId = person.id;
-
-  // Comment intents re-check access here rather than relying on the loader —
-  // loader guards don't protect actions.
   if (
     intent === "create-comment" ||
     intent === "edit-comment" ||
     intent === "delete-comment"
   ) {
-    const access = await requireContentAccess(request, course.id);
-
-    try {
-      if (intent === "create-comment") {
-        const parsed = parseFormData(formData, createCommentSchema);
-        if (!parsed.success) {
-          return { ok: false, error: "Enter a comment before posting." };
-        }
-        const created = await createComment(
-          db,
-          currentUserId,
-          lessonId,
-          parsed.data.parentId ?? null,
-          parsed.data.body,
-          new Date(),
-          await defaultNotifications()
-        );
-        if (!created.ok) return created;
-        return { ok: true };
-      }
-
-      if (intent === "edit-comment") {
-        const parsed = parseFormData(formData, editCommentSchema);
-        if (!parsed.success) {
-          return { ok: false, error: "Enter a comment before saving." };
-        }
-        // Scope the id to this lesson so a comment elsewhere can't be reached
-        // by posting its id to this route.
-        const existing = getCommentById(parsed.data.commentId);
-        if (!existing || existing.lessonId !== lessonId) {
-          throw data("Comment not found", { status: 404 });
-        }
-        const edited = editComment(
-          db,
-          parsed.data.commentId,
-          currentUserId,
-          parsed.data.body,
-          new Date()
-        );
-        if (!edited.ok) return edited;
-        return { ok: true };
-      }
-
-      const parsed = parseFormData(formData, deleteCommentSchema);
-      if (!parsed.success) {
-        return { ok: false, error: "Could not delete that comment." };
-      }
-      const existing = getCommentById(parsed.data.commentId);
-      if (!existing || existing.lessonId !== lessonId) {
-        throw data("Comment not found", { status: 404 });
-      }
-      const deleted = await deleteComment(
-        db,
-        parsed.data.commentId,
-        currentUserId,
-        access.isStaff,
-        new Date(),
-        await defaultNotifications()
-      );
-      if (!deleted.ok) return deleted;
-      return { ok: true };
-    } catch (error) {
-      // Service validation failures are user-correctable; anything thrown as a
-      // Response (404 above) should keep bubbling.
-      if (error instanceof Error) {
-        return { ok: false, error: error.message };
-      }
-      throw error;
-    }
-  }
-
-  // Bookmark and Note intents re-check access here, like the comment intents
-  // above — loader guards don't protect actions.
-  if (intent === "toggle-bookmark" || intent === "save-note") {
-    await requireContentAccess(request, course.id);
-    requireLessonInCourse(lessonId, course.id);
-
-    if (intent === "toggle-bookmark") {
-      const bookmarked = toggleBookmark(
-        db,
-        currentUserId,
-        lessonId,
-        new Date()
-      );
-      return { ok: true, bookmarked };
-    }
-
-    const parsed = parseFormData(formData, saveNoteSchema);
-    if (!parsed.success) {
-      return { ok: false, error: parsed.errors.body };
-    }
-    const saved = saveNote(
+    return updateLessonDiscussion(
       db,
-      currentUserId,
-      lessonId,
-      parsed.data.body,
-      new Date()
+      request,
+      params,
+      formData,
+      await defaultNotifications()
     );
-    if (!saved.ok) return saved;
-    return { ok: true };
+  }
+  if (intent === "toggle-bookmark" || intent === "save-note") {
+    return updateLessonPersonalData(db, request, params, formData);
   }
 
   throw data("Invalid action", { status: 400 });
