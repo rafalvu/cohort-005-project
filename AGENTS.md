@@ -14,6 +14,8 @@ Do these checks in this order before you report a change to `app/` as complete:
 
 ## Agent skills
 
+Before adding or importing modules, read [app/modules/README.md](./app/modules/README.md) for the deep-module convention.
+
 ### Issue tracker
 
 Issues and PRDs live as GitHub issues on your own copy of this repo (the `origin` remote), never on `ai-hero-dev/cohort-005-project`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
