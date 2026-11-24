@@ -35,7 +35,6 @@ const COMMENT_LANGS = [
   "text",
   "plaintext",
 ];
-//dsdafasfsafaff
 
 let highlighter: Highlighter | null = null;
 
