@@ -3,15 +3,15 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { Route } from "./+types/instructor.analytics";
 import { getInstructorReport } from "~/modules/instructor-operations/reporting.server";
 import { db } from "~/db";
-import {
-  type RevenueSeries,
-  type TopBuyer,
-  type CourseProgressSummary,
-  type FunnelLesson,
-  type CourseFunnel,
-  type QuizPassRate,
-  type CourseCountryRevenue,
-  type RefundExposure,
+import type {
+  RevenueSeries,
+  TopBuyer,
+  CourseProgressSummary,
+  FunnelLesson,
+  CourseFunnel,
+  QuizPassRate,
+  CourseCountryRevenue,
+  RefundExposure,
 } from "~/modules/instructor-analytics/index.server";
 import {
   ANALYTICS_RANGES,

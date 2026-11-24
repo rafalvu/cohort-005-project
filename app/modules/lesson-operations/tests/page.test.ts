@@ -12,9 +12,9 @@ import {
 import { getLessonPage } from "../index.server";
 import { lessonFixture, requestFor } from "./fixtures";
 
-let f: ReturnType<typeof lessonFixture>;
-beforeEach(() => {
-  f = lessonFixture();
+let f: Awaited<ReturnType<typeof lessonFixture>>;
+beforeEach(async () => {
+  f = await lessonFixture();
 });
 afterEach(() => f.db.$client.close());
 

@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { submitQuiz } from "../quizzes.server";
 import { quizFixture, requestFor } from "./quiz-fixtures";
 
-let fixture: ReturnType<typeof quizFixture>;
-beforeEach(() => {
-  fixture = quizFixture();
+let fixture: Awaited<ReturnType<typeof quizFixture>>;
+beforeEach(async () => {
+  fixture = await quizFixture();
 });
 afterEach(() => fixture.db.$client.close());
 
@@ -90,7 +90,7 @@ it("does not let an owning Instructor submit without Student qualification", asy
 });
 
 it("rejects a quiz from another course before checking Student qualification", async () => {
-  const foreign = fixture.otherQuiz();
+  const foreign = await fixture.otherQuiz();
   const before = fixture.state();
   await expect(
     submitQuiz(
@@ -108,7 +108,7 @@ it("rejects a quiz from another course before checking Student qualification", a
 
 it("rejects a foreign answer after a valid answer without persisting any part of the attempt", async () => {
   await fixture.enroll();
-  const foreign = fixture.otherQuiz();
+  const foreign = await fixture.otherQuiz();
   const before = fixture.state();
   await expect(
     submitQuiz(
@@ -499,7 +499,7 @@ it.each([
   "missing course",
 ])("rejects %s before permission even for a Platform Admin", async (kind) => {
   const person = fixture.person("Platform Admin");
-  const foreign = fixture.otherQuiz();
+  const foreign = await fixture.otherQuiz();
   const otherQuestion = fixture.addQuestion();
   let target = fixture.target;
   let form = fixture.form();

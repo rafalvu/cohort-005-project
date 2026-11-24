@@ -36,11 +36,11 @@ vi.mock("~/lib/notifications.server", async (importOriginal) => ({
 }));
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
 let notifications: ReturnType<typeof fakeNotifications>;
-beforeEach(() => {
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
   notifications = fakeNotifications();
   dependencies.db = db;
   dependencies.notifications = notifications;

@@ -8,7 +8,7 @@ import { requestFor } from "./fixtures";
 
 vi.mock("~/db", async () => {
   const { lessonFixture } = await import("./fixtures");
-  return { db: lessonFixture().db };
+  return { db: (await lessonFixture()).db };
 });
 vi.mock("../activity.server", () => ({
   completeLesson: vi.fn(),

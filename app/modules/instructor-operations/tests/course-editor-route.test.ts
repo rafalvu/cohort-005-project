@@ -14,10 +14,10 @@ vi.mock("~/db", () => ({
   },
 }));
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
-beforeEach(() => {
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
   database.current = db;
 });
 afterEach(() => {

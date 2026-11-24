@@ -3,9 +3,9 @@ import { getCourseSectionOverview } from "~/modules/course-offerings/index.serve
 import { courses, modules } from "~/db/schema";
 import { offeringFixture, requestFor } from "./fixtures";
 
-let f: ReturnType<typeof offeringFixture>;
-beforeEach(() => {
-  f = offeringFixture();
+let f: Awaited<ReturnType<typeof offeringFixture>>;
+beforeEach(async () => {
+  f = await offeringFixture();
 });
 afterEach(() => {
   f.db.$client.close();

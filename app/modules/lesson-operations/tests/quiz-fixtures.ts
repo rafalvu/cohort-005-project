@@ -3,8 +3,19 @@ import * as schema from "~/db/schema";
 import { lessonFixture, requestFor } from "./fixtures";
 import { claimSeat } from "~/lib/seat-claims.server";
 
-export function quizFixture() {
-  const fixture = lessonFixture();
+import { createInstructorCourse } from "~/modules/instructor-operations/reporting.server";
+import {
+  createCourseSection,
+  getCourseEditor,
+  updateCourseSettings,
+} from "~/modules/instructor-operations/course-editor.server";
+import {
+  createLesson,
+  getCurriculumSectionEditor,
+} from "~/modules/instructor-operations/lessons.server";
+
+export async function quizFixture() {
+  const fixture = await lessonFixture();
   const { db } = fixture;
   const existingOption = db
     .select()
@@ -65,31 +76,42 @@ export function quizFixture() {
     return formData;
   }
 
-  function otherQuiz() {
-    const course = db
-      .insert(schema.courses)
-      .values({
-        title: "Other course",
-        slug: "other-course",
-        description: "Other course",
-        salesCopy: fixture.course.salesCopy,
-        instructorId: fixture.instructor.id,
-        categoryId: fixture.course.categoryId,
-        price: 7900,
-        status: schema.CourseStatus.Published,
+  async function otherQuiz() {
+    const request = await requestFor(fixture.instructor.id);
+    const course = await createInstructorCourse(
+      db,
+      new Request(request, {
+        method: "POST",
+        body: new URLSearchParams({
+          title: "Other course",
+          description: "Other course",
+          salesCopy: fixture.course.salesCopy,
+          categoryId: String(fixture.course.categoryId),
+        }),
       })
-      .returning()
-      .get();
-    const section = db
-      .insert(schema.modules)
-      .values({ courseId: course.id, title: "Other section", position: 0 })
-      .returning()
-      .get();
-    const lesson = db
-      .insert(schema.lessons)
-      .values({ moduleId: section.id, title: "Other lesson", position: 0 })
-      .returning()
-      .get();
+    );
+    await updateCourseSettings(db, request, course.id, {
+      intent: "update-status",
+      status: schema.CourseStatus.Published,
+    });
+    await updateCourseSettings(db, request, course.id, {
+      intent: "update-price",
+      price: "79",
+    });
+    await createCourseSection(db, request, course.id, {
+      title: "Other section",
+    });
+    const section = (await getCourseEditor(db, request, course.id)).course
+      .modules[0];
+    if (!section) throw new Error("Other section was not created");
+    await createLesson(db, request, course.id, {
+      moduleId: section.id,
+      title: "Other lesson",
+    });
+    const lesson = (
+      await getCurriculumSectionEditor(db, request, course.id, section.id)
+    ).module.lessons[0];
+    if (!lesson) throw new Error("Other lesson was not created");
     const quiz = db
       .insert(schema.quizzes)
       .values({ lessonId: lesson.id, title: "Other quiz", passingScore: 0.7 })

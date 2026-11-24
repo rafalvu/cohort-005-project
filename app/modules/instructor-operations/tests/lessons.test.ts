@@ -20,11 +20,11 @@ import {
 import { enrollStudent } from "~/lib/enrollments.server";
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
 let notifications: ReturnType<typeof fakeNotifications>;
-beforeEach(() => {
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
   notifications = fakeNotifications();
 });
 afterEach(() => db.$client.close());

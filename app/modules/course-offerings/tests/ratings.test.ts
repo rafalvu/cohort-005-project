@@ -6,9 +6,9 @@ import {
 import { courseRatings, UserRole } from "~/db/schema";
 import { offeringFixture, requestFor } from "./fixtures";
 
-let f: ReturnType<typeof offeringFixture>;
-beforeEach(() => {
-  f = offeringFixture();
+let f: Awaited<ReturnType<typeof offeringFixture>>;
+beforeEach(async () => {
+  f = await offeringFixture();
 });
 afterEach(() => {
   f.db.$client.close();

@@ -7,9 +7,9 @@ import { CourseStatus, courses } from "~/db/schema";
 import { eq } from "drizzle-orm";
 import { offeringFixture, requestFor } from "./fixtures";
 
-let f: ReturnType<typeof offeringFixture>;
-beforeEach(() => {
-  f = offeringFixture();
+let f: Awaited<ReturnType<typeof offeringFixture>>;
+beforeEach(async () => {
+  f = await offeringFixture();
 });
 afterEach(() => {
   f.db.$client.close();

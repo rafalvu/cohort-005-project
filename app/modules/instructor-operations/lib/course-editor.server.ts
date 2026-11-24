@@ -6,20 +6,9 @@ import { deleteLessons } from "./delete-lessons.server";
 import { markdown } from "~/lib/text";
 import { CourseStatus } from "~/db/schema";
 import { z } from "zod";
-import { and, eq, inArray, sql, desc } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { data } from "react-router";
-import {
-  categories,
-  courses,
-  users,
-  modules,
-  lessons,
-  enrollments,
-  lessonProgress,
-  LessonProgressStatus,
-  quizzes,
-  quizAttempts,
-} from "~/db/schema";
+import { categories, courses, users, modules, lessons } from "~/db/schema";
 import { requireCurrentPerson } from "~/lib/current-person.server";
 import { requireCourseManagement } from "~/modules/course-permissions/index.server";
 import {
@@ -31,9 +20,10 @@ import {
   type Db,
 } from "./targets.server";
 
-function getUserById(db: Db, id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
+import {
+  getCourseEnrolledStudents,
+  getCourseStudentSummaries,
+} from "./student-summaries.server";
 
 function getCourseWithDetails(db: Db, id: number) {
   const course = db
@@ -92,154 +82,6 @@ function getCourseWithDetails(db: Db, id: number) {
   };
 }
 
-function getLessonCountForCourse(db: Db, courseId: number) {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return 0;
-
-  const count = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessons)
-    .where(
-      inArray(
-        lessons.moduleId,
-        courseModules.map((m) => m.id)
-      )
-    )
-    .get();
-
-  return count?.count ?? 0;
-}
-
-function getEnrollmentCountForCourse(db: Db, courseId: number) {
-  const result = db
-    .select({ count: sql<number>`count(*)` })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .get();
-
-  return result?.count ?? 0;
-}
-
-function getCourseEnrolledStudents(db: Db, courseId: number) {
-  return db
-    .select({
-      enrollmentId: enrollments.id,
-      userId: enrollments.userId,
-      enrolledAt: enrollments.enrolledAt,
-      completedAt: enrollments.completedAt,
-    })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .all();
-}
-
-function getCourseLessonIds(db: Db, courseId: number): number[] {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return [];
-
-  const courseLessons = db
-    .select({ id: lessons.id })
-    .from(lessons)
-    .where(
-      inArray(
-        lessons.moduleId,
-        courseModules.map((m) => m.id)
-      )
-    )
-    .all();
-
-  return courseLessons.map((l) => l.id);
-}
-
-function calculateProgress(
-  db: Db,
-  userId: number,
-  courseId: number,
-  weightByDuration: boolean
-) {
-  const lessonIds = getCourseLessonIds(db, courseId);
-
-  if (lessonIds.length === 0) return 0;
-
-  if (weightByDuration) {
-    const courseLessons = db
-      .select({
-        id: lessons.id,
-        durationMinutes: lessons.durationMinutes,
-      })
-      .from(lessons)
-      .where(inArray(lessons.id, lessonIds))
-      .all();
-
-    const totalDuration = courseLessons.reduce(
-      (sum, l) => sum + (l.durationMinutes ?? 1),
-      0
-    );
-
-    if (totalDuration === 0) return 0;
-
-    const completed = db
-      .select()
-      .from(lessonProgress)
-      .where(
-        and(
-          eq(lessonProgress.userId, userId),
-          eq(lessonProgress.status, LessonProgressStatus.Completed),
-          inArray(lessonProgress.lessonId, lessonIds)
-        )
-      )
-      .all();
-
-    const completedIds = new Set(completed.map((p) => p.lessonId));
-
-    const completedDuration = courseLessons
-      .filter((l) => completedIds.has(l.id))
-      .reduce((sum, l) => sum + (l.durationMinutes ?? 1), 0);
-
-    return Math.round((completedDuration / totalDuration) * 100);
-  }
-
-  const completedCount = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.status, LessonProgressStatus.Completed),
-        inArray(lessonProgress.lessonId, lessonIds)
-      )
-    )
-    .get();
-
-  return Math.round(((completedCount?.count ?? 0) / lessonIds.length) * 100);
-}
-
-function getQuizByLessonId(db: Db, lessonId: number) {
-  return db.select().from(quizzes).where(eq(quizzes.lessonId, lessonId)).get();
-}
-
-function getBestAttempt(db: Db, userId: number, quizId: number) {
-  return db
-    .select()
-    .from(quizAttempts)
-    .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
-    )
-    .orderBy(desc(quizAttempts.score))
-    .limit(1)
-    .get();
-}
-
 export async function getCourseEditor(
   db: Db,
   request: Request,
@@ -251,59 +93,15 @@ export async function getCourseEditor(
   await requireCourseManagement(db, request, courseId);
   const course = getCourseWithDetails(db, courseId);
   if (!course) throw data("Course not found.", { status: 404 });
-  const lessonCount = getLessonCountForCourse(db, courseId);
-  const enrollmentCount = getEnrollmentCountForCourse(db, courseId);
-
-  // Student roster data
+  const courseLessons = course.modules.flatMap((section) => section.lessons);
   const enrolledStudents = getCourseEnrolledStudents(db, courseId);
-
-  // Gather all lessons from the course modules and find which have quizzes
-  const allCourseLessons = course.modules.flatMap((mod) => mod.lessons);
-  const lessonQuizzes: {
-    lessonId: number;
-    lessonTitle: string;
-    quizId: number;
-    quizTitle: string;
-  }[] = [];
-  for (const lesson of allCourseLessons) {
-    const quiz = getQuizByLessonId(db, lesson.id);
-    if (quiz) {
-      lessonQuizzes.push({
-        lessonId: lesson.id,
-        lessonTitle: lesson.title,
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-      });
-    }
-  }
-
-  const students = enrolledStudents.map((enrollment) => {
-    const studentUser = getUserById(db, enrollment.userId);
-    const progress = calculateProgress(db, enrollment.userId, courseId, false);
-
-    const quizScores = lessonQuizzes.map((lq) => {
-      const bestAttempt = getBestAttempt(db, enrollment.userId, lq.quizId);
-      return {
-        quizId: lq.quizId,
-        quizTitle: lq.quizTitle,
-        lessonTitle: lq.lessonTitle,
-        bestScore: bestAttempt?.score ?? null,
-        passed: bestAttempt?.passed ?? null,
-      };
-    });
-
-    return {
-      userId: enrollment.userId,
-      name: studentUser?.name ?? "Unknown",
-      email: studentUser?.email ?? "",
-      enrolledAt: enrollment.enrolledAt,
-      completedAt: enrollment.completedAt,
-      progress,
-      quizScores,
-    };
-  });
-
-  const quizCount = lessonQuizzes.length;
+  const lessonCount = courseLessons.length;
+  const enrollmentCount = enrolledStudents.length;
+  const { students, quizCount } = getCourseStudentSummaries(
+    db,
+    courseLessons,
+    enrolledStudents
+  );
 
   return { course, lessonCount, enrollmentCount, students, quizCount };
 }

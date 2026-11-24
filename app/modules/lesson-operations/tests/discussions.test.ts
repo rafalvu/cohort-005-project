@@ -6,9 +6,9 @@ import { updateLessonDiscussion } from "../discussions.server";
 import { requestFor } from "./fixtures";
 import { discussionFixture, commandForm as form } from "./discussion-fixtures";
 
-let f: ReturnType<typeof discussionFixture>;
-beforeEach(() => {
-  f = discussionFixture();
+let f: Awaited<ReturnType<typeof discussionFixture>>;
+beforeEach(async () => {
+  f = await discussionFixture();
 });
 afterEach(() => f.db.$client.close());
 
