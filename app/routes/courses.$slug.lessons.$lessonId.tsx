@@ -19,14 +19,9 @@ import {
   courses,
   lessons,
   modules,
-  quizzes,
-  quizQuestions,
-  quizOptions,
-  quizAttempts,
-  quizAnswers,
   LessonProgressStatus,
 } from "~/db/schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
@@ -52,6 +47,7 @@ import {
 import { cn, formatDuration, formatRelativeTime } from "~/lib/utils";
 import { getLessonPage } from "~/modules/lesson-operations/index.server";
 import { completeLesson } from "~/modules/lesson-operations/activity.server";
+import { submitQuiz } from "~/modules/lesson-operations/quizzes.server";
 import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
@@ -119,128 +115,6 @@ function getCommentById(commentId: number) {
   return db.select().from(comments).where(eq(comments.id, commentId)).get();
 }
 
-function calculateGrade(score: any): any {
-  try {
-    if (score >= 0.9) return "A";
-    if (score >= 0.8) return "B";
-    if (score >= 0.7) return "C";
-    if (score >= 0.6) return "D";
-    return "F";
-  } catch (e) {
-    console.log(e);
-    return "F";
-  }
-}
-
-function computeResult(userId: any, quizId: any, selectedAnswers: any): any {
-  try {
-    const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
-    if (!quiz) {
-      console.log("quiz not found");
-      return null;
-    }
-
-    const questions = db
-      .select()
-      .from(quizQuestions)
-      .where(eq(quizQuestions.quizId, quizId))
-      .orderBy(quizQuestions.position)
-      .all();
-
-    let correct = 0;
-    let total = questions.length;
-    const questionResults: any[] = [];
-
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      const selected = selectedAnswers[q.id];
-
-      if (!selected) {
-        questionResults.push({
-          questionId: q.id,
-          correct: false,
-          selectedOptionId: null,
-          correctOptionId: null,
-        });
-        continue;
-      }
-
-      let correctOptionId = null;
-      if (q.questionType === "multiple_choice") {
-        const opts = db
-          .select()
-          .from(quizOptions)
-          .where(eq(quizOptions.questionId, q.id))
-          .all();
-        const correctOpt = opts.find((o) => o.isCorrect === true);
-        correctOptionId = correctOpt ? correctOpt.id : null;
-      } else if (q.questionType === "true_false") {
-        const correctOpt = db
-          .select()
-          .from(quizOptions)
-          .where(
-            and(
-              eq(quizOptions.questionId, q.id),
-              eq(quizOptions.isCorrect, true)
-            )
-          )
-          .get();
-        correctOptionId = correctOpt ? correctOpt.id : null;
-      }
-
-      const isCorrect = selected === correctOptionId;
-      if (isCorrect) correct++;
-
-      questionResults.push({
-        questionId: q.id,
-        correct: isCorrect,
-        selectedOptionId: selected,
-        correctOptionId,
-      });
-    }
-
-    const scoreValue = total > 0 ? correct / total : 0;
-    const passed = scoreValue > 0.7;
-    const grade = calculateGrade(scoreValue);
-
-    const attempt = db
-      .insert(quizAttempts)
-      .values({
-        userId,
-        quizId,
-        score: scoreValue,
-        passed,
-      })
-      .returning()
-      .get();
-
-    for (const result of questionResults) {
-      if (result.selectedOptionId !== null) {
-        db.insert(quizAnswers)
-          .values({
-            attemptId: attempt.id,
-            questionId: result.questionId,
-            selectedOptionId: result.selectedOptionId,
-          })
-          .run();
-      }
-    }
-
-    return {
-      attemptId: attempt.id,
-      score: scoreValue,
-      passed,
-      grade,
-      totalCorrect: correct,
-      totalQuestions: total,
-      questionResults,
-    };
-  } catch (e) {
-    console.log(e);
-    return null;
-  }
-}
-
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.lesson?.title ?? "Lesson";
   const courseTitle = loaderData?.course?.title ?? "Course";
@@ -260,6 +134,9 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("Invalid lesson command", { status: 400 });
   }
   const intent = formData.get("intent");
+  if (intent === "submit-quiz") {
+    return submitQuiz(db, request, params, formData);
+  }
   if (intent === "mark-complete") {
     return completeLesson(db, request, params, formData);
   }
@@ -378,32 +255,6 @@ export async function action({ params, request }: Route.ActionArgs) {
     );
     if (!saved.ok) return saved;
     return { ok: true };
-  }
-
-  if (intent === "submit-quiz") {
-    const quizId = Number(formData.get("quizId"));
-    if (isNaN(quizId)) {
-      throw data("Invalid quiz ID", { status: 400 });
-    }
-
-    // Collect answers: form fields named "question-{questionId}" with value = optionId
-    const selectedAnswers: Record<number, number> = {};
-    for (const [key, value] of formData.entries()) {
-      if (key.startsWith("question-")) {
-        const questionId = Number(key.replace("question-", ""));
-        const optionId = Number(value);
-        if (!isNaN(questionId) && !isNaN(optionId)) {
-          selectedAnswers[questionId] = optionId;
-        }
-      }
-    }
-
-    const result = computeResult(currentUserId, quizId, selectedAnswers);
-    if (!result) {
-      throw data("Failed to score quiz", { status: 500 });
-    }
-
-    return { quizResult: result };
   }
 
   throw data("Invalid action", { status: 400 });
