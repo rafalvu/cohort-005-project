@@ -1,6 +1,5 @@
 import { Link } from "react-router";
 import type { Route } from "./+types/instructor";
-import { getCurrentUserId } from "~/lib/session";
 import {
   Card,
   CardContent,
@@ -17,51 +16,10 @@ import {
   Users,
 } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
-import { data, isRouteErrorResponse } from "react-router";
-import { CourseStatus, UserRole } from "~/db/schema";
+import { isRouteErrorResponse } from "react-router";
+import { CourseStatus } from "~/db/schema";
 import { db } from "~/db";
-import { users, courses, modules, lessons, enrollments } from "~/db/schema";
-import { eq, or, sql } from "drizzle-orm";
-
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-function getCoursesByInstructor(instructorId: number) {
-  return db
-    .select()
-    .from(courses)
-    .where(eq(courses.instructorId, instructorId))
-    .all();
-}
-
-function getLessonCountForCourse(courseId: number) {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return 0;
-
-  const count = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
-    .get();
-
-  return count?.count ?? 0;
-}
-
-function getEnrollmentCountForCourse(courseId: number) {
-  const result = db
-    .select({ count: sql<number>`count(*)` })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .get();
-
-  return result?.count ?? 0;
-}
+import { getInstructorWorkspace } from "~/modules/instructor-operations/reporting.server";
 
 export function meta() {
   return [
@@ -71,43 +29,7 @@ export function meta() {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to view your courses.", {
-      status: 401,
-    });
-  }
-
-  const user = getUserById(currentUserId);
-
-  if (!user || user.role !== UserRole.Instructor) {
-    throw data("Only instructors can access this page.", {
-      status: 403,
-    });
-  }
-
-  const instructorCourses = getCoursesByInstructor(currentUserId);
-
-  const coursesWithStats = instructorCourses.map((course) => {
-    const lessonCount = getLessonCountForCourse(course.id);
-    const enrollmentCount = getEnrollmentCountForCourse(course.id);
-
-    return {
-      id: course.id,
-      title: course.title,
-      slug: course.slug,
-      description: course.description,
-      status: course.status,
-      coverImageUrl: course.coverImageUrl,
-      lessonCount,
-      enrollmentCount,
-      createdAt: course.createdAt,
-      updatedAt: course.updatedAt,
-    };
-  });
-
-  return { courses: coursesWithStats };
+  return getInstructorWorkspace(db, request);
 }
 
 function statusBadge(status: string) {

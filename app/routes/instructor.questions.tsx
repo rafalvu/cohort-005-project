@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, data, isRouteErrorResponse, useFetcher } from "react-router";
+import { Link, isRouteErrorResponse, useFetcher } from "react-router";
 import { toast } from "sonner";
-import { z } from "zod";
 import type { Route } from "./+types/instructor.questions";
-import { requireInstructorOrAdmin, requireStaff } from "~/lib/access.server";
-import { renderComment } from "~/lib/comment-markdown.server";
-import { createComment } from "~/lib/comments.server";
 import { defaultNotifications } from "~/lib/notifications.server";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
@@ -15,175 +11,24 @@ import { UserAvatar } from "~/components/user-avatar";
 import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import { cn, daysSince, formatRelativeTime } from "~/lib/utils";
 import { MAX_COMMENT_LENGTH } from "~/lib/comments";
-import { parseFormData } from "~/lib/validation";
-import type { Markdown } from "~/lib/text";
 import { db } from "~/db";
 import {
-  comments,
-  courses,
-  lessons,
-  modules,
-  users,
-  UserRole,
-} from "~/db/schema";
-import { eq, ne, or, and, isNull, notExists, sql, desc } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+  getInstructorQuestions,
+  replyToDiscussionQuestion,
+} from "~/modules/instructor-operations/reporting.server";
 
-type QueuedQuestion = {
-  id: number;
-  body: Markdown;
-  createdAt: string;
-  lessonId: number;
-  lessonTitle: string;
-  courseTitle: string;
-  courseSlug: string;
-  authorId: number;
-  authorName: string;
-  authorAvatarUrl: string | null;
-};
-
-function getUnansweredQuestions(instructorId: number | null): QueuedQuestion[] {
-  const author = alias(users, "author");
-  const reply = alias(comments, "reply");
-  const replyAuthor = alias(users, "reply_author");
-
-  // Correlated: matches a live reply, by staff, to the outer question.
-  const staffReply = db
-    .select({ one: sql`1` })
-    .from(reply)
-    .innerJoin(replyAuthor, eq(replyAuthor.id, reply.userId))
-    .where(
-      and(
-        eq(reply.parentId, comments.id),
-        isNull(reply.deletedAt),
-        or(
-          eq(replyAuthor.role, UserRole.Admin),
-          eq(reply.userId, courses.instructorId)
-        )
-      )
-    );
-
-  const conditions = [
-    isNull(comments.parentId),
-    isNull(comments.deletedAt),
-    // Staff asking their own question shouldn't queue up as work for themselves.
-    ne(author.role, UserRole.Admin),
-    ne(comments.userId, courses.instructorId),
-    notExists(staffReply),
-  ];
-
-  if (instructorId !== null) {
-    conditions.push(eq(courses.instructorId, instructorId));
-  }
-
-  return db
-    .select({
-      id: comments.id,
-      body: comments.body,
-      createdAt: comments.createdAt,
-      lessonId: lessons.id,
-      lessonTitle: lessons.title,
-      courseTitle: courses.title,
-      courseSlug: courses.slug,
-      authorId: author.id,
-      authorName: author.name,
-      authorAvatarUrl: author.avatarUrl,
-    })
-    .from(comments)
-    .innerJoin(author, eq(comments.userId, author.id))
-    .innerJoin(lessons, eq(comments.lessonId, lessons.id))
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .innerJoin(courses, eq(modules.courseId, courses.id))
-    .where(and(...conditions))
-    .orderBy(desc(comments.createdAt), desc(comments.id))
-    .all();
-}
-
-function getCommentById(commentId: number) {
-  return db.select().from(comments).where(eq(comments.id, commentId)).get();
-}
-
-function getCourseForLesson(lessonId: number) {
-  return db
-    .select({
-      courseId: courses.id,
-      courseTitle: courses.title,
-      courseSlug: courses.slug,
-      instructorId: courses.instructorId,
-    })
-    .from(lessons)
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .innerJoin(courses, eq(modules.courseId, courses.id))
-    .where(eq(lessons.id, lessonId))
-    .get();
-}
-
-// A question sitting this long without an answer gets called out visually.
 const STALE_AFTER_DAYS = 3;
-
-const replySchema = z.object({
-  intent: z.literal("reply"),
-  commentId: z.coerce.number().int(),
-  body: z.string(),
-});
 
 export function meta() {
   return [{ title: "Unanswered Questions — Cadence" }];
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { userId, isAdmin } = await requireInstructorOrAdmin(request);
-
-  // Admins span every course; instructors see only the courses they own.
-  const questions = getUnansweredQuestions(isAdmin ? null : userId);
-
-  const rendered = await Promise.all(
-    questions.map(async (question) => ({
-      ...question,
-      bodyHtml: await renderComment(question.body),
-    }))
-  );
-
-  return { questions: rendered, isAdmin };
+  return getInstructorQuestions(db, request);
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const formData = await request.formData();
-  const parsed = parseFormData(formData, replySchema);
-
-  if (!parsed.success) {
-    return { ok: false, error: "Enter a reply before posting." };
-  }
-
-  const question = getCommentById(parsed.data.commentId);
-  if (!question) {
-    throw data("Question not found", { status: 404 });
-  }
-
-  const course = getCourseForLesson(question.lessonId);
-  if (!course) {
-    throw data("Course not found", { status: 404 });
-  }
-
-  // Answering as the course's voice — so it must be the course's own
-  // instructor, or an admin.
-  const { userId: authorId } = await requireStaff(request, course.courseId);
-  if (!authorId) {
-    throw data("Select a user from the DevUI panel.", { status: 401 });
-  }
-
-  const created = await createComment(
-    db,
-    authorId,
-    question.lessonId,
-    question.id,
-    parsed.data.body,
-    new Date(),
-    await defaultNotifications()
-  );
-  if (!created.ok) return created;
-
-  return { ok: true };
+  return replyToDiscussionQuestion(db, request, await defaultNotifications());
 }
 
 type Question = Awaited<ReturnType<typeof loader>>["questions"][number];
