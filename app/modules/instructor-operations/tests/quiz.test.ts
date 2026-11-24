@@ -81,7 +81,7 @@ it("lets the owning Instructor inspect a lesson before creating its quiz", async
     module: { id: fixture.section.id },
     existingQuiz: null,
   });
-  expect(db.$client.serialize()).toEqual(before);
+  expect(db.$client.serialize().equals(before)).toBe(true);
 });
 
 it("replaces a quiz and its attempts while keeping edited correct answers and ordering", async () => {
@@ -196,7 +196,7 @@ it.each(["save-quiz", "delete-quiz"])(
     await expect(
       updateQuizEditor(db, request, fixture.course.id, fixture.lesson.id)
     ).rejects.toThrow("late deletion failure");
-    expect(db.$client.serialize()).toEqual(before);
+    expect(db.$client.serialize().equals(before)).toBe(true);
     expect(notifications.sent).toEqual(sent);
   }
 );
@@ -225,7 +225,7 @@ it("restores the original quiz and attempts when replacement fails while creatin
       fixture.lesson.id
     )
   ).rejects.toThrow("late creation failure");
-  expect(db.$client.serialize()).toEqual(before);
+  expect(db.$client.serialize().equals(before)).toBe(true);
   expect(notifications.sent).toEqual(sent);
   expect(
     (
@@ -429,7 +429,7 @@ it.each([
         99999
       )
     ).rejects.toMatchObject({ init: { status: 400 } });
-    expect(db.$client.serialize()).toEqual(before);
+    expect(db.$client.serialize().equals(before)).toBe(true);
   }
 );
 
@@ -454,7 +454,7 @@ it.each([
     await expect(
       updateQuizEditor(db, request, fixture.course.id, fixture.lesson.id)
     ).rejects.toMatchObject({ init: { status: 400 } });
-    expect(db.$client.serialize()).toEqual(before);
+    expect(db.$client.serialize().equals(before)).toBe(true);
   }
 );
 

@@ -83,7 +83,7 @@ it.each(["save-quiz", "delete-quiz"])(
     await expect(action(args(request))).rejects.toMatchObject({
       init: { status: 403 },
     });
-    expect(db.$client.serialize()).toEqual(before);
+    expect(db.$client.serialize().equals(before)).toBe(true);
   }
 );
 
@@ -104,7 +104,7 @@ it("rejects nonexistent numeric questions before a direct action writes", async 
   await expect(
     action(args(await saveRequest(fixture.instructor.id, content)))
   ).rejects.toMatchObject({ init: { status: 404 } });
-  expect(db.$client.serialize()).toEqual(before);
+  expect(db.$client.serialize().equals(before)).toBe(true);
 });
 
 it("wires save, editor read, and deletion with their existing success responses", async () => {
@@ -167,7 +167,7 @@ it("supports reopening and saving a replacement, then deleting and recreating th
       args(await saveRequest(fixture.instructor.id, editableQuiz(initial)))
     )
   ).rejects.toMatchObject({ init: { status: 404 } });
-  expect(db.$client.serialize()).toEqual(beforeStaleSave);
+  expect(db.$client.serialize().equals(beforeStaleSave)).toBe(true);
   const latest = (await loader(args(await requestAs(fixture.instructor.id))))
     .existingQuiz;
   if (!latest) throw new Error("Expected latest quiz");

@@ -57,7 +57,7 @@ async function rejectsUnchanged(
   const sent = [...notifications.sent];
   const feed = await notifications.feedOf(fixture.instructor.id);
   await expect(operation()).rejects.toMatchObject({ init: { status } });
-  expect(db.$client.serialize()).toEqual(before);
+  expect(db.$client.serialize().equals(before)).toBe(true);
   expect(notifications.sent).toEqual(sent);
   expect(await notifications.feedOf(fixture.instructor.id)).toEqual(feed);
 }
