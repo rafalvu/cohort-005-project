@@ -2,22 +2,8 @@ import { useState } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/instructor.$courseId.lessons.$lessonId.quiz";
-import { getCurrentUserId } from "~/lib/session";
-import {
-  UserRole,
-  QuestionType,
-  users,
-  courses,
-  modules,
-  lessons,
-  quizzes,
-  quizQuestions,
-  quizOptions,
-  quizAttempts,
-  quizAnswers,
-} from "~/db/schema";
+import { QuestionType } from "~/db/schema";
 import { db } from "~/db";
-import { eq, sql } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -48,45 +34,11 @@ import {
   Draggable,
   type DropResult,
 } from "@hello-pangea/dnd";
-import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
-import { parseFormData, parseParams } from "~/lib/validation";
-
-const quizParamsSchema = z.object({
-  courseId: z.coerce.number().int(),
-  lessonId: z.coerce.number().int(),
-});
-
-const wizardDataSchema = z.object({
-  title: z.string().trim().min(1, "Quiz title is required."),
-  passingScore: z.number(),
-  questions: z
-    .array(
-      z.object({
-        id: z.string(),
-        text: z.string(),
-        type: z.nativeEnum(QuestionType),
-        options: z.array(
-          z.object({
-            id: z.string(),
-            text: z.string(),
-            isCorrect: z.boolean(),
-          })
-        ),
-      })
-    )
-    .min(1, "At least one question is required."),
-});
-
-const quizActionSchema = z.discriminatedUnion("intent", [
-  z.object({
-    intent: z.literal("save-quiz"),
-    wizardData: z.string(),
-  }),
-  z.object({
-    intent: z.literal("delete-quiz"),
-  }),
-]);
+import { isRouteErrorResponse } from "react-router";
+import {
+  getQuizEditor,
+  updateQuizEditor,
+} from "~/modules/instructor-operations/quiz.server";
 
 // ─── Types for wizard state ───
 
@@ -110,157 +62,7 @@ interface WizardState {
 }
 
 function generateId() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-function getCourseById(id: number) {
-  return db.select().from(courses).where(eq(courses.id, id)).get();
-}
-
-function getModuleById(id: number) {
-  return db.select().from(modules).where(eq(modules.id, id)).get();
-}
-
-function getLessonById(id: number) {
-  return db.select().from(lessons).where(eq(lessons.id, id)).get();
-}
-
-function getQuizById(id: number) {
-  return db.select().from(quizzes).where(eq(quizzes.id, id)).get();
-}
-
-function getQuizByLessonId(lessonId: number) {
-  return db.select().from(quizzes).where(eq(quizzes.lessonId, lessonId)).get();
-}
-
-function getQuestionsByQuiz(quizId: number) {
-  return db
-    .select()
-    .from(quizQuestions)
-    .where(eq(quizQuestions.quizId, quizId))
-    .orderBy(quizQuestions.position)
-    .all();
-}
-
-function getQuizWithQuestions(quizId: number) {
-  const quiz = getQuizById(quizId);
-  if (!quiz) return null;
-
-  const questions = db
-    .select()
-    .from(quizQuestions)
-    .where(eq(quizQuestions.quizId, quizId))
-    .orderBy(quizQuestions.position)
-    .all();
-
-  const questionsWithOptions = questions.map((question) => {
-    const options = db
-      .select()
-      .from(quizOptions)
-      .where(eq(quizOptions.questionId, question.id))
-      .all();
-    return { ...question, options };
-  });
-
-  return { ...quiz, questions: questionsWithOptions };
-}
-
-function createQuiz(lessonId: number, title: string, passingScore: number) {
-  return db
-    .insert(quizzes)
-    .values({ lessonId, title, passingScore })
-    .returning()
-    .get();
-}
-
-function updateQuiz(
-  id: number,
-  title: string | null,
-  passingScore: number | null
-) {
-  const updates: Record<string, unknown> = {};
-  if (title !== null) updates.title = title;
-  if (passingScore !== null) updates.passingScore = passingScore;
-
-  if (Object.keys(updates).length === 0) {
-    return getQuizById(id);
-  }
-
-  return db
-    .update(quizzes)
-    .set(updates)
-    .where(eq(quizzes.id, id))
-    .returning()
-    .get();
-}
-
-function deleteQuiz(id: number) {
-  // Cascade: delete answers -> attempts -> options -> questions -> quiz
-  const questions = getQuestionsByQuiz(id);
-  for (const question of questions) {
-    db.delete(quizOptions).where(eq(quizOptions.questionId, question.id)).run();
-  }
-
-  const attempts = db
-    .select()
-    .from(quizAttempts)
-    .where(eq(quizAttempts.quizId, id))
-    .all();
-  for (const attempt of attempts) {
-    db.delete(quizAnswers).where(eq(quizAnswers.attemptId, attempt.id)).run();
-  }
-
-  db.delete(quizAttempts).where(eq(quizAttempts.quizId, id)).run();
-  db.delete(quizQuestions).where(eq(quizQuestions.quizId, id)).run();
-  return db.delete(quizzes).where(eq(quizzes.id, id)).returning().get();
-}
-
-function createQuestion(
-  quizId: number,
-  questionText: string,
-  questionType: QuestionType,
-  position: number | null
-) {
-  const pos =
-    position ??
-    db
-      .select({
-        max: sql<number>`coalesce(max(${quizQuestions.position}), 0)`,
-      })
-      .from(quizQuestions)
-      .where(eq(quizQuestions.quizId, quizId))
-      .get()!.max + 1;
-
-  return db
-    .insert(quizQuestions)
-    .values({ quizId, questionText, questionType, position: pos })
-    .returning()
-    .get();
-}
-
-function deleteQuestion(id: number) {
-  db.delete(quizOptions).where(eq(quizOptions.questionId, id)).run();
-  return db
-    .delete(quizQuestions)
-    .where(eq(quizQuestions.id, id))
-    .returning()
-    .get();
-}
-
-function createOption(
-  questionId: number,
-  optionText: string,
-  isCorrect: boolean
-) {
-  return db
-    .insert(quizOptions)
-    .values({ questionId, optionText, isCorrect })
-    .returning()
-    .get();
+  return `new-${Math.random().toString(36).slice(2, 10) || "0"}`;
 }
 
 // ─── Meta ───
@@ -278,159 +80,11 @@ export function meta({ loaderData }: Route.MetaArgs) {
 // ─── Loader ───
 
 export async function loader({ params, request }: Route.LoaderArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel.", { status: 401 });
-  }
-
-  const user = getUserById(currentUserId);
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
-    throw data("Only instructors and admins can access this page.", {
-      status: 403,
-    });
-  }
-
-  const courseId = parseInt(params.courseId, 10);
-  if (isNaN(courseId)) {
-    throw data("Invalid course ID.", { status: 400 });
-  }
-
-  const course = getCourseById(courseId);
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  if (course.instructorId !== currentUserId && user.role !== UserRole.Admin) {
-    throw data("You can only edit your own courses.", { status: 403 });
-  }
-
-  const lessonId = parseInt(params.lessonId, 10);
-  if (isNaN(lessonId)) {
-    throw data("Invalid lesson ID.", { status: 400 });
-  }
-
-  const lesson = getLessonById(lessonId);
-  if (!lesson) {
-    throw data("Lesson not found.", { status: 404 });
-  }
-
-  const mod = getModuleById(lesson.moduleId);
-  if (!mod || mod.courseId !== courseId) {
-    throw data("Lesson not found in this course.", { status: 404 });
-  }
-
-  // Load existing quiz if present
-  const existingQuizBasic = getQuizByLessonId(lessonId);
-  const existingQuiz = existingQuizBasic
-    ? getQuizWithQuestions(existingQuizBasic.id)
-    : null;
-
-  return { course, lesson, module: mod, existingQuiz };
+  return getQuizEditor(db, request, params.courseId, params.lessonId);
 }
 
-// ─── Action ───
-
 export async function action({ params, request }: Route.ActionArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("You must be logged in.", { status: 401 });
-  }
-
-  const user = getUserById(currentUserId);
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
-    throw data("Only instructors and admins can manage quizzes.", {
-      status: 403,
-    });
-  }
-
-  const { courseId, lessonId } = parseParams(params, quizParamsSchema);
-
-  const course = getCourseById(courseId);
-  if (
-    !course ||
-    (course.instructorId !== currentUserId && user.role !== UserRole.Admin)
-  ) {
-    throw data("Course not found or not yours.", { status: 403 });
-  }
-
-  const lesson = getLessonById(lessonId);
-  if (!lesson) {
-    throw data("Lesson not found.", { status: 404 });
-  }
-
-  const mod = getModuleById(lesson.moduleId);
-  if (!mod || mod.courseId !== courseId) {
-    throw data("Lesson not found in this course.", { status: 404 });
-  }
-
-  const formData = await request.formData();
-  const parsed = parseFormData(formData, quizActionSchema);
-
-  if (!parsed.success) {
-    return data(
-      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
-      { status: 400 }
-    );
-  }
-
-  const { intent } = parsed.data;
-
-  if (intent === "save-quiz") {
-    let wizardData: z.infer<typeof wizardDataSchema>;
-    try {
-      const raw = JSON.parse(parsed.data.wizardData);
-      const wizardResult = wizardDataSchema.safeParse(raw);
-      if (!wizardResult.success) {
-        return data({ error: "Invalid quiz data." }, { status: 400 });
-      }
-      wizardData = wizardResult.data;
-    } catch {
-      return data({ error: "Invalid quiz data." }, { status: 400 });
-    }
-
-    // Delete existing quiz if present
-    const existingQuiz = getQuizByLessonId(lessonId);
-    if (existingQuiz) {
-      deleteQuiz(existingQuiz.id);
-    }
-
-    // Create the quiz
-    const quiz = createQuiz(
-      lessonId,
-      wizardData.title.trim(),
-      wizardData.passingScore / 100
-    );
-
-    // Create questions and options
-    for (let qi = 0; qi < wizardData.questions.length; qi++) {
-      const q = wizardData.questions[qi];
-      const question = createQuestion(quiz.id, q.text.trim(), q.type, qi + 1);
-
-      for (const opt of q.options) {
-        createOption(question.id, opt.text.trim(), opt.isCorrect);
-      }
-    }
-
-    return { success: true };
-  }
-
-  if (intent === "delete-quiz") {
-    const existingQuiz = getQuizByLessonId(lessonId);
-    if (existingQuiz) {
-      deleteQuiz(existingQuiz.id);
-    }
-    return { success: true, deleted: true };
-  }
-
-  throw data("Invalid action.", { status: 400 });
+  return updateQuizEditor(db, request, params.courseId, params.lessonId);
 }
 
 // ─── Step Indicators ───
@@ -495,11 +149,11 @@ export default function QuizBuilderWizard({
         title: existingQuiz.title,
         passingScore: Math.round(existingQuiz.passingScore * 100),
         questions: existingQuiz.questions.map((q) => ({
-          id: generateId(),
+          id: String(q.id),
           text: q.questionText,
-          type: q.questionType as QuestionType,
+          type: q.questionType,
           options: q.options.map((o) => ({
-            id: generateId(),
+            id: String(o.id),
             text: o.optionText,
             isCorrect: o.isCorrect,
           })),
@@ -1040,6 +694,9 @@ export default function QuizBuilderWizard({
                   fetcher.submit(
                     {
                       intent: "save-quiz",
+                      ...(existingQuiz
+                        ? { quizId: String(existingQuiz.id) }
+                        : {}),
                       wizardData: JSON.stringify(wizard),
                     },
                     { method: "post" }
@@ -1121,11 +778,15 @@ export default function QuizBuilderWizard({
             className="text-destructive hover:text-destructive"
             onClick={() => {
               if (
+                existingQuiz &&
                 confirm(
                   "Are you sure you want to delete this quiz? All student attempts will be lost."
                 )
               ) {
-                fetcher.submit({ intent: "delete-quiz" }, { method: "post" });
+                fetcher.submit(
+                  { intent: "delete-quiz", quizId: String(existingQuiz.id) },
+                  { method: "post" }
+                );
               }
             }}
           >
