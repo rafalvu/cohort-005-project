@@ -1,7 +1,5 @@
 export {
   getCoursePermissions,
-  requireCurrentPerson,
-  requireCourseContent,
   requireCourseManagement,
   requireInstructorOrAdmin,
   type CoursePermissions,

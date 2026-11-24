@@ -3,7 +3,7 @@ import { Link, useFetcher, useBlocker } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/instructor.$courseId.lessons.$lessonId";
 import { db } from "~/db";
-import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
 import {
   getLessonEditor,
   updateLesson,

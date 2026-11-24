@@ -13,7 +13,10 @@ import {
   UserRole,
 } from "~/db/schema";
 import { isEnrolled } from "~/lib/enrollments.server";
-import { getCurrentUserId } from "~/lib/session";
+import {
+  getCurrentPerson,
+  requireCurrentPerson,
+} from "~/lib/current-person.server";
 import { resolveCountry } from "~/lib/country.server";
 import { checkPppAccess } from "~/lib/ppp";
 
@@ -53,11 +56,7 @@ export async function getCoursePermissions(
   request: Request,
   courseId: number
 ): Promise<CoursePermissions> {
-  const userId = await getCurrentUserId(request);
-  const user =
-    userId === null
-      ? undefined
-      : db.select().from(users).where(eq(users.id, userId)).get();
+  const user = await getCurrentPerson(db, request);
   if (!user) return { ...DENIED };
 
   const course = db
@@ -141,19 +140,6 @@ export async function getCoursePermissions(
   };
 }
 
-export async function requireCurrentPerson(
-  db: Db,
-  request: Request
-): Promise<Person> {
-  const userId = await getCurrentUserId(request);
-  const user =
-    userId === null
-      ? undefined
-      : db.select().from(users).where(eq(users.id, userId)).get();
-  if (!user) throw data("Select a user from the DevUI panel.", { status: 401 });
-  return user;
-}
-
 async function requireExistingCoursePermissions(
   db: Db,
   request: Request,
@@ -173,22 +159,6 @@ async function requireExistingCoursePermissions(
     throw data("Course not found.", { status: 404 });
   }
   return getCoursePermissions(db, request, courseId);
-}
-
-export async function requireCourseContent(
-  db: Db,
-  request: Request,
-  courseId: number
-) {
-  const permissions = await requireExistingCoursePermissions(
-    db,
-    request,
-    courseId
-  );
-  if (!permissions.canViewContent) {
-    throw data("You must be enrolled in this course.", { status: 403 });
-  }
-  return permissions;
 }
 
 export async function requireCourseManagement(

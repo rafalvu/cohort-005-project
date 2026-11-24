@@ -8,10 +8,8 @@ import {
   quizQuestions,
   quizzes,
 } from "~/db/schema";
-import {
-  getCoursePermissions,
-  requireCurrentPerson,
-} from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
+import { getCoursePermissions } from "~/modules/course-permissions/index.server";
 import {
   positiveIdSchema,
   resolveLessonTarget,

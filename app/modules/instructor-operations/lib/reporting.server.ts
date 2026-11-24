@@ -11,10 +11,8 @@ import {
   categories,
   CourseStatus,
 } from "~/db/schema";
-import {
-  requireCurrentPerson,
-  requireInstructorOrAdmin,
-} from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
+import { requireInstructorOrAdmin } from "~/modules/course-permissions/index.server";
 import { identifier, parseInput, type Db } from "./targets.server";
 import { z } from "zod";
 import { markdown } from "~/lib/text";

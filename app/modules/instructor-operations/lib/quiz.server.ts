@@ -10,10 +10,8 @@ import {
   quizAnswers,
   QuestionType,
 } from "~/db/schema";
-import {
-  requireCurrentPerson,
-  requireCourseManagement,
-} from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
+import { requireCourseManagement } from "~/modules/course-permissions/index.server";
 import {
   identifier,
   parseInput,
