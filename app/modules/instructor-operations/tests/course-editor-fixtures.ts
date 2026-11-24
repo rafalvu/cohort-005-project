@@ -4,9 +4,6 @@ import { toggleBookmark } from "~/lib/bookmarks.server";
 import type { Notifications } from "~/lib/notifications.server";
 import { eq } from "drizzle-orm";
 import {
-  courses,
-  lessons,
-  modules,
   users,
   UserRole,
   quizzes,
@@ -22,7 +19,15 @@ import {
 import { setCurrentUserId } from "~/lib/session";
 import { seedBaseData, type TestDb } from "~/test/setup";
 
-export function seedEditor(db: TestDb) {
+import { createInstructorCourse } from "../reporting.server";
+import {
+  createCourseSection,
+  getCourseEditor,
+  updateCourseSettings,
+} from "../course-editor.server";
+import { createLesson, getLessonEditor, updateLesson } from "../lessons.server";
+
+export async function seedEditor(db: TestDb) {
   const base = seedBaseData(db);
   const admin = db
     .insert(users)
@@ -42,41 +47,56 @@ export function seedEditor(db: TestDb) {
     })
     .returning()
     .get();
-  const otherCourse = db
-    .insert(courses)
-    .values({
-      ...base.course,
-      id: undefined,
-      slug: "other-course",
-      instructorId: otherInstructor.id,
+  const request = await requestAs(base.instructor.id);
+  const otherRequest = await requestAs(otherInstructor.id);
+  const otherCourse = await createInstructorCourse(
+    db,
+    new Request(otherRequest, {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "Other course",
+        description: base.course.description,
+        salesCopy: base.course.salesCopy,
+        categoryId: String(base.category.id),
+      }),
     })
-    .returning()
-    .get();
-  const section = db
-    .insert(modules)
-    .values({ courseId: base.course.id, title: "First section", position: 1 })
-    .returning()
-    .get();
-  const secondSection = db
-    .insert(modules)
-    .values({ courseId: base.course.id, title: "Second section", position: 2 })
-    .returning()
-    .get();
-  const otherSection = db
-    .insert(modules)
-    .values({ courseId: otherCourse.id, title: "Other section", position: 1 })
-    .returning()
-    .get();
-  const lesson = db
-    .insert(lessons)
-    .values({
-      moduleId: section.id,
-      title: "First lesson",
-      position: 1,
-      durationMinutes: 5,
-    })
-    .returning()
-    .get();
+  );
+  await updateCourseSettings(db, otherRequest, otherCourse.id, {
+    intent: "update-status",
+    status: base.course.status,
+  });
+  await createCourseSection(db, request, base.course.id, {
+    title: "First section",
+  });
+  await createCourseSection(db, request, base.course.id, {
+    title: "Second section",
+  });
+  await createCourseSection(db, otherRequest, otherCourse.id, {
+    title: "Other section",
+  });
+  const { course } = await getCourseEditor(db, request, base.course.id);
+  const [section, secondSection] = course.modules;
+  const otherSection = (await getCourseEditor(db, otherRequest, otherCourse.id))
+    .course.modules[0];
+  if (!section || !secondSection || !otherSection)
+    throw new Error("Curriculum sections were not created");
+  await createLesson(db, request, course.id, {
+    moduleId: section.id,
+    title: "First lesson",
+  });
+  const createdLesson = (await getCourseEditor(db, request, course.id)).course
+    .modules[0]?.lessons[0];
+  if (!createdLesson) throw new Error("Lesson was not created");
+  await updateLesson(db, request, course.id, createdLesson.id, {
+    intent: "update-lesson",
+    durationMinutes: "5",
+  });
+  const { lesson } = await getLessonEditor(
+    db,
+    request,
+    course.id,
+    createdLesson.id
+  );
   return {
     ...base,
     admin,

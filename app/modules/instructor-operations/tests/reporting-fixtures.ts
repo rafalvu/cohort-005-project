@@ -63,7 +63,7 @@ import { seedEditor, requestAs } from "./course-editor-fixtures";
 
 export async function seedQuestions(
   db: TestDb,
-  fixture: ReturnType<typeof seedEditor>,
+  fixture: Awaited<ReturnType<typeof seedEditor>>,
   notifications: Notifications
 ) {
   const now = new Date("2026-11-24T12:00:00Z");
@@ -108,7 +108,7 @@ import { eq } from "drizzle-orm";
 
 export function removeQuestionAncestor(
   db: TestDb,
-  fixture: ReturnType<typeof seedEditor>,
+  fixture: Awaited<ReturnType<typeof seedEditor>>,
   ancestor: "lesson" | "section" | "course"
 ) {
   db.$client.pragma("foreign_keys = OFF");

@@ -1,4 +1,4 @@
-import { lessons } from "~/db/schema";
+import { createLesson, getCurriculumSectionEditor } from "../lessons.server";
 import { enrollStudent } from "~/lib/enrollments.server";
 import { fakeNotifications } from "~/lib/notifications.fake.server";
 import { getNote } from "~/lib/notes.server";
@@ -21,10 +21,10 @@ import {
 } from "./course-editor-fixtures";
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
-beforeEach(() => {
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
 });
 afterEach(() => db.$client.close());
 
@@ -435,15 +435,20 @@ it("rolls back earlier section positions if a later reorder write fails", async 
 it("deleting one populated section preserves the other course and its Notifications", async () => {
   const notifications = fakeNotifications();
   await populateLesson(db, fixture.lesson.id, fixture.user.id, notifications);
-  const otherLesson = db
-    .insert(lessons)
-    .values({
-      moduleId: fixture.otherSection.id,
-      title: "Unrelated lesson",
-      position: 1,
-    })
-    .returning()
-    .get();
+  const otherRequest = await requestAs(fixture.otherInstructor.id);
+  await createLesson(db, otherRequest, fixture.otherCourse.id, {
+    moduleId: fixture.otherSection.id,
+    title: "Unrelated lesson",
+  });
+  const otherLesson = (
+    await getCurriculumSectionEditor(
+      db,
+      otherRequest,
+      fixture.otherCourse.id,
+      fixture.otherSection.id
+    )
+  ).module.lessons[0];
+  if (!otherLesson) throw new Error("Unrelated lesson was not created");
   await populateLesson(db, otherLesson.id, fixture.user.id, notifications);
   const otherEditor = await getCourseEditor(
     db,

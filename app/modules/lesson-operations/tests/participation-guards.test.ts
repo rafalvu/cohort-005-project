@@ -14,10 +14,10 @@ const intents = [
   "toggle-bookmark",
 ] as const;
 type Intent = (typeof intents)[number];
-let f: ReturnType<typeof discussionFixture>;
+let f: Awaited<ReturnType<typeof discussionFixture>>;
 let commentId: number;
 beforeEach(async () => {
-  f = discussionFixture();
+  f = await discussionFixture();
   await f.privateData();
   commentId = (await f.comment()).id;
 });

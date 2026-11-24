@@ -849,7 +849,6 @@ export function getInstructorAnalytics(
   const reply = alias(comments, "reply");
   const replyAuthor = alias(users, "reply_author");
 
-  // Correlated: matches a live reply, by staff, to the outer question.
   const staffReply = db
     .select({ one: sql`1` })
     .from(reply)
@@ -860,7 +859,10 @@ export function getInstructorAnalytics(
         isNull(reply.deletedAt),
         or(
           eq(replyAuthor.role, UserRole.Admin),
-          eq(reply.userId, courses.instructorId)
+          and(
+            eq(replyAuthor.role, UserRole.Instructor),
+            eq(reply.userId, courses.instructorId)
+          )
         )
       )
     );
@@ -870,7 +872,10 @@ export function getInstructorAnalytics(
     isNull(comments.deletedAt),
     // Staff asking their own question shouldn't queue up as work for themselves.
     ne(questionAuthor.role, UserRole.Admin),
-    ne(comments.userId, courses.instructorId),
+    or(
+      ne(questionAuthor.role, UserRole.Instructor),
+      ne(comments.userId, courses.instructorId)
+    ),
     notExists(staffReply),
   ];
 

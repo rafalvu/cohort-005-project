@@ -1,42 +1,65 @@
-import {
-  bookmarks,
-  comments,
-  courses,
-  lessons,
-  modules,
-  notes,
-} from "~/db/schema";
+import { bookmarks, comments, notes } from "~/db/schema";
 import { createComment } from "~/lib/comments.server";
-import { lessonFixture } from "./fixtures";
+import { lessonFixture, requestFor } from "./fixtures";
 
-export function discussionFixture() {
-  const fixture = lessonFixture();
+import { createInstructorCourse } from "~/modules/instructor-operations/reporting.server";
+import {
+  createCourseSection,
+  getCourseEditor,
+  updateCourseSettings,
+} from "~/modules/instructor-operations/course-editor.server";
+import {
+  createLesson,
+  getCurriculumSectionEditor,
+} from "~/modules/instructor-operations/lessons.server";
+
+export async function discussionFixture() {
+  const fixture = await lessonFixture();
   const { db, course, user, lesson, notifications } = fixture;
-  const otherCourse = db
-    .insert(courses)
-    .values({
-      title: "Another course",
-      slug: "another-course",
-      instructorId: course.instructorId,
-      description: course.description,
-      salesCopy: course.salesCopy,
-      status: course.status,
-      categoryId: course.categoryId,
-      price: 7900,
-      pppEnabled: true,
+  const request = await requestFor(fixture.instructor.id);
+  const otherCourse = await createInstructorCourse(
+    db,
+    new Request(request, {
+      method: "POST",
+      body: new URLSearchParams({
+        title: "Another course",
+        description: course.description,
+        salesCopy: course.salesCopy,
+        categoryId: String(course.categoryId),
+      }),
     })
-    .returning()
-    .get();
-  const otherSection = db
-    .insert(modules)
-    .values({ courseId: otherCourse.id, title: "Another section", position: 0 })
-    .returning()
-    .get();
-  const otherLesson = db
-    .insert(lessons)
-    .values({ moduleId: otherSection.id, title: "Another lesson", position: 0 })
-    .returning()
-    .get();
+  );
+  await updateCourseSettings(db, request, otherCourse.id, {
+    intent: "update-status",
+    status: course.status,
+  });
+  await updateCourseSettings(db, request, otherCourse.id, {
+    intent: "update-price",
+    price: "79",
+  });
+  await updateCourseSettings(db, request, otherCourse.id, {
+    intent: "update-ppp-enabled",
+    pppEnabled: "true",
+  });
+  await createCourseSection(db, request, otherCourse.id, {
+    title: "Another section",
+  });
+  const otherSection = (await getCourseEditor(db, request, otherCourse.id))
+    .course.modules[0];
+  if (!otherSection) throw new Error("Other section was not created");
+  await createLesson(db, request, otherCourse.id, {
+    moduleId: otherSection.id,
+    title: "Another lesson",
+  });
+  const otherLesson = (
+    await getCurriculumSectionEditor(
+      db,
+      request,
+      otherCourse.id,
+      otherSection.id
+    )
+  ).module.lessons[0];
+  if (!otherLesson) throw new Error("Other lesson was not created");
   async function comment(
     authorId = user.id,
     lessonId = lesson.id,

@@ -10,7 +10,7 @@ import { requestFor } from "./fixtures";
 
 vi.mock("~/db", async () => {
   const { lessonFixture } = await import("./fixtures");
-  return { db: lessonFixture().db };
+  return { db: (await lessonFixture()).db };
 });
 vi.mock("../discussions.server", () => ({ updateLessonDiscussion: vi.fn() }));
 vi.mock("../personal.server", () => ({ updateLessonPersonalData: vi.fn() }));

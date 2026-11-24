@@ -1,3 +1,10 @@
+import { getCourseEditor } from "../course-editor.server";
+import {
+  createLesson,
+  getCurriculumSectionEditor,
+  updateLesson,
+} from "../lessons.server";
+import { updateLessonDiscussion } from "~/modules/lesson-operations/discussions.server";
 import { createComment } from "~/lib/comments.server";
 import { getInstructorAnalytics } from "~/modules/instructor-analytics/index.server";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -29,10 +36,10 @@ import {
 } from "./course-editor-fixtures";
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
-beforeEach(() => {
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
 });
 afterEach(() => db.$client.close());
 
@@ -169,7 +176,7 @@ it("rejects duplicate course slugs and empty titles without creating another cou
   expect(db.$client.serialize()).toEqual(before);
 });
 
-it("returns enrolled Student progress and best quiz results to the owning Instructor and Platform Admin", async () => {
+it("returns lesson-count progress and best quiz results consistently in the editor and roster", async () => {
   const notifications = fakeNotifications();
   await enrollStudent(
     db,
@@ -179,7 +186,39 @@ it("returns enrolled Student progress and best quiz results to the owning Instru
     notifications
   );
   await populateLesson(db, fixture.lesson.id, fixture.user.id, notifications);
+  const owner = await requestAs(fixture.instructor.id);
+  await createLesson(db, owner, fixture.course.id, {
+    moduleId: fixture.section.id,
+    title: "Long unfinished lesson",
+  });
+  const unfinished = (
+    await getCurriculumSectionEditor(
+      db,
+      owner,
+      fixture.course.id,
+      fixture.section.id
+    )
+  ).module.lessons[1];
+  if (!unfinished) throw new Error("Unfinished lesson was not created");
+  await updateLesson(db, owner, fixture.course.id, unfinished.id, {
+    intent: "update-lesson",
+    durationMinutes: "95",
+  });
   for (const id of [fixture.instructor.id, fixture.admin.id]) {
+    expect(
+      await getCourseEditor(db, await requestAs(id), fixture.course.id)
+    ).toMatchObject({
+      lessonCount: 2,
+      enrollmentCount: 1,
+      quizCount: 1,
+      students: [
+        {
+          userId: fixture.user.id,
+          progress: 50,
+          quizScores: [{ bestScore: 1, passed: true }],
+        },
+      ],
+    });
     expect(
       await getStudentRoster(db, await requestAs(id), fixture.course.id)
     ).toMatchObject({
@@ -190,7 +229,7 @@ it("returns enrolled Student progress and best quiz results to the owning Instru
           userId: fixture.user.id,
           email: fixture.user.email,
           lapsed: false,
-          progress: 100,
+          progress: 50,
           quizScores: [{ bestScore: 1, passed: true }],
         },
       ],
@@ -237,6 +276,15 @@ it("retains lapsed Students and their history after Enrollment ends", async () =
   const notifications = fakeNotifications();
   await populateLesson(db, fixture.lesson.id, fixture.user.id, notifications);
   recordPurchase(db, fixture.user.id, fixture.course.id, 5000);
+  expect(
+    (
+      await getCourseEditor(
+        db,
+        await requestAs(fixture.instructor.id),
+        fixture.course.id
+      )
+    ).students
+  ).toEqual([]);
   expect(
     await getStudentRoster(
       db,
@@ -633,4 +681,96 @@ it("checks current role on a previously authenticated Instructor request", async
   await expect(
     getStudentRoster(db, request, fixture.course.id)
   ).rejects.toMatchObject({ init: { status: 403 } });
+});
+
+it("keeps a Discussion Question unanswered after an enrolled demoted owner replies as a Student", async () => {
+  const notifications = fakeNotifications();
+  const now = new Date("2026-11-24T12:00:00Z");
+  const question = await createComment(
+    db,
+    fixture.user.id,
+    fixture.lesson.id,
+    null,
+    "Student question",
+    now,
+    notifications
+  );
+  if (!question.ok) throw new Error(question.error);
+  await enrollStudent(
+    db,
+    fixture.instructor.id,
+    fixture.course.id,
+    now,
+    notifications
+  );
+  demote(db, fixture.instructor.id);
+  const admin = await requestAs(fixture.admin.id);
+  expect(
+    (await getInstructorQuestions(db, admin)).questions.map((entry) => entry.id)
+  ).toEqual([question.comment.id]);
+  const form = new FormData();
+  form.set("intent", "create-comment");
+  form.set("parentId", String(question.comment.id));
+  form.set("body", "A fellow Student reply");
+  await updateLessonDiscussion(
+    db,
+    await requestAs(fixture.instructor.id),
+    { slug: fixture.course.slug, lessonId: String(fixture.lesson.id) },
+    form,
+    notifications
+  );
+  expect(
+    (await getInstructorQuestions(db, admin)).questions.map((entry) => entry.id)
+  ).toEqual([question.comment.id]);
+  expect((await getInstructorReport(db, admin, now)).questions).toEqual({
+    inRange: 1,
+    older: 0,
+  });
+  await replyToDiscussionQuestion(
+    db,
+    await reportingRequest(fixture.admin.id, {
+      intent: "reply",
+      commentId: String(question.comment.id),
+      body: "Platform Admin answer",
+    }),
+    notifications,
+    now
+  );
+  expect((await getInstructorQuestions(db, admin)).questions).toEqual([]);
+  expect((await getInstructorReport(db, admin, now)).questions).toEqual({
+    inRange: 0,
+    older: 0,
+  });
+});
+
+it("includes new Discussion Questions from an enrolled demoted owner in the queue and analytics", async () => {
+  const notifications = fakeNotifications();
+  const now = new Date();
+  await enrollStudent(
+    db,
+    fixture.instructor.id,
+    fixture.course.id,
+    now,
+    notifications
+  );
+  demote(db, fixture.instructor.id);
+  const form = new FormData();
+  form.set("intent", "create-comment");
+  form.set("body", "My question as a Student");
+  await updateLessonDiscussion(
+    db,
+    await requestAs(fixture.instructor.id),
+    { slug: fixture.course.slug, lessonId: String(fixture.lesson.id) },
+    form,
+    notifications
+  );
+  const admin = await requestAs(fixture.admin.id);
+  const queue = await getInstructorQuestions(db, admin);
+  expect(queue.questions).toMatchObject([
+    { authorId: fixture.instructor.id, body: "My question as a Student" },
+  ]);
+  expect((await getInstructorReport(db, admin, now)).questions).toEqual({
+    inRange: 1,
+    older: 0,
+  });
 });

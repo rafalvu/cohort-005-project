@@ -17,10 +17,10 @@ import {
 } from "./quiz-fixtures";
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
-beforeEach(() => {
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
+beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
 });
 
 it("creates an ordered quiz with trimmed text and the configured correct answers", async () => {

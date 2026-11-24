@@ -18,14 +18,14 @@ import {
 } from "./quiz-fixtures";
 
 let db: TestDb;
-let fixture: ReturnType<typeof seedEditor>;
+let fixture: Awaited<ReturnType<typeof seedEditor>>;
 let quiz: Awaited<ReturnType<typeof createQuiz>>;
 let otherQuiz: typeof quiz;
 let siblingQuiz: typeof quiz;
 let notifications: ReturnType<typeof fakeNotifications>;
 beforeEach(async () => {
   db = createTestDb();
-  fixture = seedEditor(db);
+  fixture = await seedEditor(db);
   quiz = await createQuiz(
     db,
     fixture.instructor.id,

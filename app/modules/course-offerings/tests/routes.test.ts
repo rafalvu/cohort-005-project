@@ -17,9 +17,9 @@ vi.mock("~/db", () => ({
     return database.current;
   },
 }));
-let f: ReturnType<typeof offeringFixture>;
-beforeEach(() => {
-  f = offeringFixture();
+let f: Awaited<ReturnType<typeof offeringFixture>>;
+beforeEach(async () => {
+  f = await offeringFixture();
   database.current = f.db;
 });
 afterEach(() => {

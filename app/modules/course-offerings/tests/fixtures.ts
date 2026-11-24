@@ -4,9 +4,17 @@ import { createTestDb, seedBaseData } from "~/test/setup";
 import { enrollStudent } from "~/lib/enrollments.server";
 import { fakeNotifications } from "~/lib/notifications.fake.server";
 import { setCurrentUserId } from "~/lib/session";
-import { markdown } from "~/lib/text";
+import {
+  createCourseSection,
+  getCourseEditor,
+} from "~/modules/instructor-operations/course-editor.server";
+import {
+  createLesson,
+  getLessonEditor,
+  updateLesson,
+} from "~/modules/instructor-operations/lessons.server";
 
-export function offeringFixture() {
+export async function offeringFixture() {
   const db = createTestDb();
   const base = seedBaseData(db);
   const notifications = fakeNotifications();
@@ -14,30 +22,36 @@ export function offeringFixture() {
     .set({ price: 7900, pppEnabled: true })
     .where(eq(schema.courses.id, base.course.id))
     .run();
-  const section = db
-    .insert(schema.modules)
-    .values({
-      courseId: base.course.id,
-      title: "Getting started",
-      position: 0,
-    })
-    .returning()
-    .get();
-  const lessons = [0, 1, 2].map((position) =>
-    db
-      .insert(schema.lessons)
-      .values({
-        moduleId: section.id,
-        title: `Lesson ${position + 1}`,
-        position,
-        durationMinutes: 10,
-        content: markdown("Protected body"),
-        videoUrl: "https://video.example/secret",
-        githubRepoUrl: "https://code.example/secret",
-      })
-      .returning()
-      .get()
-  );
+  const request = await requestFor(base.instructor.id);
+  await createCourseSection(db, request, base.course.id, {
+    title: "Getting started",
+  });
+  const section = (await getCourseEditor(db, request, base.course.id)).course
+    .modules[0];
+  if (!section) throw new Error("Curriculum section was not created");
+  const createdLessons = [];
+  for (const position of [0, 1, 2]) {
+    const title = `Lesson ${position + 1}`;
+    await createLesson(db, request, base.course.id, {
+      moduleId: section.id,
+      title,
+    });
+    const created = (
+      await getCourseEditor(db, request, base.course.id)
+    ).course.modules[0]?.lessons.find((lesson) => lesson.title === title);
+    if (!created) throw new Error("Lesson was not created");
+    await updateLesson(db, request, base.course.id, created.id, {
+      intent: "update-lesson",
+      durationMinutes: "10",
+      content: "Protected body",
+      videoUrl: "https://video.example/secret",
+      githubRepoUrl: "https://code.example/secret",
+    });
+    createdLessons.push(
+      (await getLessonEditor(db, request, base.course.id, created.id)).lesson
+    );
+  }
+  const lessons = createdLessons;
   const firstLesson = lessons[0];
   if (!firstLesson) throw new Error("No lesson seeded");
   async function enroll(userId = base.user.id) {
