@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { Link, useFetcher, useNavigate } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
-import { getCurrentUserId } from "~/lib/session";
 import { requireContentAccess } from "~/lib/access.server";
 import {
   createComment,
@@ -18,7 +17,6 @@ import { db } from "~/db";
 import {
   comments,
   courses,
-  lessonProgress,
   lessons,
   modules,
   quizzes,
@@ -53,6 +51,8 @@ import {
 } from "lucide-react";
 import { cn, formatDuration, formatRelativeTime } from "~/lib/utils";
 import { getLessonPage } from "~/modules/lesson-operations/index.server";
+import { completeLesson } from "~/modules/lesson-operations/activity.server";
+import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
 import { z } from "zod";
@@ -61,10 +61,6 @@ import { parseFormData, parseParams } from "~/lib/validation";
 const lessonParamsSchema = z.object({
   slug: z.string().min(1),
   lessonId: z.coerce.number().int(),
-});
-
-const markCompleteSchema = z.object({
-  intent: z.literal("mark-complete"),
 });
 
 const createCommentSchema = z.object({
@@ -117,46 +113,6 @@ function requireLessonInCourse(lessonId: number, courseId: number) {
   if (!mod || mod.courseId !== courseId) {
     throw data("Lesson not found in this course", { status: 404 });
   }
-}
-
-function getLessonProgress(userId: number, lessonId: number) {
-  return db
-    .select()
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.lessonId, lessonId)
-      )
-    )
-    .get();
-}
-
-function markLessonComplete(userId: number, lessonId: number) {
-  const existing = getLessonProgress(userId, lessonId);
-
-  if (existing) {
-    return db
-      .update(lessonProgress)
-      .set({
-        status: LessonProgressStatus.Completed,
-        completedAt: new Date().toISOString(),
-      })
-      .where(eq(lessonProgress.id, existing.id))
-      .returning()
-      .get();
-  }
-
-  return db
-    .insert(lessonProgress)
-    .values({
-      userId,
-      lessonId,
-      status: LessonProgressStatus.Completed,
-      completedAt: new Date().toISOString(),
-    })
-    .returning()
-    .get();
 }
 
 function getCommentById(commentId: number) {
@@ -296,20 +252,24 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  const { slug, lessonId } = parseParams(params, lessonParamsSchema);
+  const person = await requireCurrentPerson(db, request);
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    throw data("Invalid lesson command", { status: 400 });
+  }
+  const intent = formData.get("intent");
+  if (intent === "mark-complete") {
+    return completeLesson(db, request, params, formData);
+  }
 
+  const { slug, lessonId } = parseParams(params, lessonParamsSchema);
   const course = getCourseBySlug(slug);
   if (!course) {
     throw data("Course not found", { status: 404 });
   }
-
-  const currentUserId = await getCurrentUserId(request);
-  if (!currentUserId) {
-    throw data("You must be logged in", { status: 401 });
-  }
-
-  const formData = await request.formData();
-  const intent = formData.get("intent");
+  const currentUserId = person.id;
 
   // Comment intents re-check access here rather than relying on the loader —
   // loader guards don't protect actions.
@@ -418,11 +378,6 @@ export async function action({ params, request }: Route.ActionArgs) {
     );
     if (!saved.ok) return saved;
     return { ok: true };
-  }
-
-  if (intent === "mark-complete") {
-    markLessonComplete(currentUserId, lessonId);
-    return { success: true };
   }
 
   if (intent === "submit-quiz") {
