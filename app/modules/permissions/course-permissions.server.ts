@@ -1,5 +1,4 @@
 import { db } from "~/db";
-import type { Db, Person } from "./lib/person";
 import {
   decide,
   getCourseDecisions,
@@ -7,6 +6,7 @@ import {
   type Capability,
   type CourseRef,
 } from "./lib/course-permissions";
+import type { Db, Person } from "./lib/person";
 
 export type {
   Capability,

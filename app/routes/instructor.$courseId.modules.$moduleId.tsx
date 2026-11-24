@@ -1,13 +1,4 @@
-import { Link } from "react-router";
-import type { Route } from "./+types/instructor.$courseId.modules.$moduleId";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { users, courses, categories, modules, lessons } from "~/db/schema";
-import { db } from "~/db";
-import { eq, or } from "drizzle-orm";
-import { Card, CardContent } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
-import { UserAvatar } from "~/components/user-avatar";
+import { inArray, eq } from "drizzle-orm";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -18,8 +9,17 @@ import {
   FileText,
   Video,
 } from "lucide-react";
+import { Link } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
+import { UserAvatar } from "~/components/user-avatar";
+import { db } from "~/db";
+import { users, courses, categories, modules, lessons } from "~/db/schema";
 import { formatDuration } from "~/lib/utils";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/instructor.$courseId.modules.$moduleId";
 
 function getCourseWithDetails(id: number) {
   const course = db
@@ -64,7 +64,7 @@ function getCourseWithDetails(id: number) {
       ? db
           .select()
           .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
+          .where(inArray(lessons.moduleId, moduleIds))
           .orderBy(lessons.position)
           .all()
       : [];
@@ -153,7 +153,7 @@ export function HydrateFallback() {
         </CardContent>
       </Card>
       <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
+        {[1, 2, 3, 4, 5].map((i) => (
           <Skeleton key={i} className="h-12 w-full" />
         ))}
       </div>

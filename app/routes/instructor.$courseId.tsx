@@ -1,43 +1,10 @@
-import { useState, useRef, useEffect } from "react";
-import { Link, useFetcher } from "react-router";
-import { toast } from "sonner";
 import {
   DragDropContext,
   Droppable,
   Draggable,
   type DropResult,
 } from "@hello-pangea/dnd";
-import type { Route } from "./+types/instructor.$courseId";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { markdown } from "~/lib/text";
-import { CourseStatus } from "~/db/schema";
-import { db } from "~/db";
-import {
-  courses,
-  categories,
-  users,
-  modules,
-  lessons,
-  enrollments,
-  lessonProgress,
-  LessonProgressStatus,
-  quizzes,
-  quizAttempts,
-} from "~/db/schema";
-import { eq, and, or, sql, desc, gt, gte } from "drizzle-orm";
-import { formatDuration, formatPrice } from "~/lib/utils";
-import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { inArray, eq, and, sql, desc, gt, gte } from "drizzle-orm";
 import {
   ArrowLeft,
   BookOpen,
@@ -56,9 +23,42 @@ import {
   Globe,
   FileText,
 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Link, useFetcher } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
+import { toast } from "sonner";
 import { z } from "zod";
-import { parseFormData } from "~/lib/validation";
+import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "~/components/ui/tabs";
+import { db } from "~/db";
+import {
+  courses,
+  categories,
+  users,
+  modules,
+  lessons,
+  enrollments,
+  lessonProgress,
+  LessonProgressStatus,
+  quizzes,
+  quizAttempts,
+} from "~/db/schema";
+import { CourseStatus } from "~/db/schema";
+import { markdown } from "~/lib/text";
+import { formatDuration } from "~/lib/utils";
+import { formPosition, formId, parseFormData } from "~/lib/validation";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/instructor.$courseId";
 
 function getUserById(id: number) {
   return db.select().from(users).where(eq(users.id, id)).get();
@@ -107,7 +107,7 @@ function getCourseWithDetails(id: number) {
       ? db
           .select()
           .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
+          .where(inArray(lessons.moduleId, moduleIds))
           .orderBy(lessons.position)
           .all()
       : [];
@@ -133,7 +133,12 @@ function getLessonCountForCourse(courseId: number) {
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .get();
 
   return count?.count ?? 0;
@@ -211,11 +216,11 @@ function createModule(
 ) {
   const pos =
     position ??
-    db
+    (db
       .select({ max: sql<number>`coalesce(max(${modules.position}), 0)` })
       .from(modules)
       .where(eq(modules.courseId, courseId))
-      .get()!.max + 1;
+      .get()?.max ?? 0) + 1;
 
   return db
     .insert(modules)
@@ -272,11 +277,11 @@ function createLesson(
 ) {
   const pos =
     position ??
-    db
+    (db
       .select({ max: sql<number>`coalesce(max(${lessons.position}), 0)` })
       .from(lessons)
       .where(eq(lessons.moduleId, moduleId))
-      .get()!.max + 1;
+      .get()?.max ?? 0) + 1;
 
   return db
     .insert(lessons)
@@ -391,7 +396,12 @@ function getCourseLessonIds(courseId: number): number[] {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   return courseLessons.map((l) => l.id);
@@ -413,7 +423,7 @@ function calculateProgress(
         durationMinutes: lessons.durationMinutes,
       })
       .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
+      .where(inArray(lessons.id, lessonIds))
       .all();
 
     const totalDuration = courseLessons.reduce(
@@ -430,7 +440,7 @@ function calculateProgress(
         and(
           eq(lessonProgress.userId, userId),
           eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+          inArray(lessonProgress.lessonId, lessonIds)
         )
       )
       .all();
@@ -451,7 +461,7 @@ function calculateProgress(
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -488,7 +498,16 @@ const courseEditorActionSchema = z.discriminatedUnion("intent", [
     intent: z.literal("update-status"),
     status: z.nativeEnum(CourseStatus),
   }),
-  z.object({ intent: z.literal("update-price"), price: z.string() }),
+  z.object({
+    intent: z.literal("update-price"),
+    price: z
+      .string()
+      .trim()
+      .regex(
+        /^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/,
+        "Enter a price in dollars and cents."
+      ),
+  }),
   z.object({ intent: z.literal("update-ppp-enabled"), pppEnabled: z.string() }),
   z.object({
     intent: z.literal("add-module"),
@@ -496,21 +515,21 @@ const courseEditorActionSchema = z.discriminatedUnion("intent", [
   }),
   z.object({
     intent: z.literal("rename-module"),
-    moduleId: z.coerce.number().int(),
+    moduleId: formId,
     title: z.string().trim().min(1, "Module title cannot be empty."),
   }),
   z.object({
     intent: z.literal("delete-module"),
-    moduleId: z.coerce.number().int(),
+    moduleId: formId,
   }),
   z.object({
     intent: z.literal("add-lesson"),
-    moduleId: z.coerce.number().int(),
+    moduleId: formId,
     title: z.string().trim().min(1, "Lesson title cannot be empty."),
   }),
   z.object({
     intent: z.literal("rename-lesson"),
-    lessonId: z.coerce.number().int(),
+    lessonId: formId,
     title: z.string().trim().min(1, "Lesson title cannot be empty."),
   }),
   z.object({
@@ -519,18 +538,18 @@ const courseEditorActionSchema = z.discriminatedUnion("intent", [
   }),
   z.object({
     intent: z.literal("reorder-lessons"),
-    moduleId: z.coerce.number().int(),
+    moduleId: formId,
     lessonIds: z.string().min(1, "Missing lesson IDs."),
   }),
   z.object({
     intent: z.literal("move-lesson"),
-    lessonId: z.coerce.number().int(),
-    targetModuleId: z.coerce.number().int(),
-    targetPosition: z.coerce.number().int(),
+    lessonId: formId,
+    targetModuleId: formId,
+    targetPosition: formPosition,
   }),
   z.object({
     intent: z.literal("delete-lesson"),
-    lessonId: z.coerce.number().int(),
+    lessonId: formId,
   }),
   z.object({
     intent: z.literal("update-sales-copy"),
@@ -955,8 +974,9 @@ function InlineEditableDescription({
           value={editValue}
           onChange={(e) => {
             setEditValue(e.target.value);
-            e.target.style.height = "auto";
-            e.target.style.height = e.target.scrollHeight + "px";
+            const textarea = e.currentTarget;
+            textarea.style.height = "auto";
+            textarea.style.height = textarea.scrollHeight + "px";
           }}
           onBlur={handleSave}
           onKeyDown={handleKeyDown}

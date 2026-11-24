@@ -1,19 +1,14 @@
+import { eq } from "drizzle-orm";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Link, redirect, useFetcher } from "react-router";
+import { data, isRouteErrorResponse } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/instructor.new";
-import { people } from "~/modules/permissions/person.server";
-import { parseFormData } from "~/lib/validation";
-import { markdown } from "~/lib/text";
-import { db } from "~/db";
-import { categories, courses, CourseStatus } from "~/db/schema";
-import { eq } from "drizzle-orm";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
-import { Textarea } from "~/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -21,8 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { AlertTriangle, ArrowLeft } from "lucide-react";
-import { data, isRouteErrorResponse } from "react-router";
+import { Textarea } from "~/components/ui/textarea";
+import { db } from "~/db";
+import { categories, courses, CourseStatus } from "~/db/schema";
+import { markdown } from "~/lib/text";
+import { formId, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/instructor.new";
 
 function getAllCategories() {
   return db.select().from(categories).orderBy(categories.name).all();
@@ -72,7 +72,7 @@ const newCourseSchema = z.object({
   title: z.string().trim().min(1, "Title is required."),
   description: z.string().trim().min(1, "Description is required."),
   salesCopy: z.string().trim().min(1, "Sales copy is required."),
-  categoryId: z.string().min(1, "Category is required."),
+  categoryId: formId,
   coverImageUrl: z.string().trim().optional(),
 });
 
@@ -124,7 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
     description,
     salesCopy,
     person.id,
-    parseInt(categoryId, 10),
+    categoryId,
     coverImageUrl || null
   );
 

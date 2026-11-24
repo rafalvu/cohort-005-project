@@ -1,31 +1,10 @@
-import { useState } from "react";
-import { Link, useFetcher, useNavigate } from "react-router";
-import { toast } from "sonner";
-import type { Route } from "./+types/instructor.$courseId.lessons.$lessonId.quiz";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
 import {
-  QuestionType,
-  modules,
-  lessons,
-  quizzes,
-  quizQuestions,
-  quizOptions,
-  quizAttempts,
-  quizAnswers,
-} from "~/db/schema";
-import { db } from "~/db";
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { eq, sql } from "drizzle-orm";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
-import { Label } from "~/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "~/components/ui/select";
 import {
   ArrowLeft,
   ArrowRight,
@@ -39,15 +18,36 @@ import {
   XCircle,
   AlertTriangle,
 } from "lucide-react";
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  type DropResult,
-} from "@hello-pangea/dnd";
+import { useState } from "react";
+import { Link, useFetcher, useNavigate } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
+import { toast } from "sonner";
 import { z } from "zod";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { db } from "~/db";
+import {
+  QuestionType,
+  modules,
+  lessons,
+  quizzes,
+  quizQuestions,
+  quizOptions,
+  quizAttempts,
+  quizAnswers,
+} from "~/db/schema";
 import { parseFormData } from "~/lib/validation";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/instructor.$courseId.lessons.$lessonId.quiz";
 
 const wizardDataSchema = z.object({
   title: z.string().trim().min(1, "Quiz title is required."),
@@ -161,27 +161,6 @@ function createQuiz(lessonId: number, title: string, passingScore: number) {
     .get();
 }
 
-function updateQuiz(
-  id: number,
-  title: string | null,
-  passingScore: number | null
-) {
-  const updates: Record<string, unknown> = {};
-  if (title !== null) updates.title = title;
-  if (passingScore !== null) updates.passingScore = passingScore;
-
-  if (Object.keys(updates).length === 0) {
-    return getQuizById(id);
-  }
-
-  return db
-    .update(quizzes)
-    .set(updates)
-    .where(eq(quizzes.id, id))
-    .returning()
-    .get();
-}
-
 function deleteQuiz(id: number) {
   // Cascade: delete answers -> attempts -> options -> questions -> quiz
   const questions = getQuestionsByQuiz(id);
@@ -211,26 +190,17 @@ function createQuestion(
 ) {
   const pos =
     position ??
-    db
+    (db
       .select({
         max: sql<number>`coalesce(max(${quizQuestions.position}), 0)`,
       })
       .from(quizQuestions)
       .where(eq(quizQuestions.quizId, quizId))
-      .get()!.max + 1;
+      .get()?.max ?? 0) + 1;
 
   return db
     .insert(quizQuestions)
     .values({ quizId, questionText, questionType, position: pos })
-    .returning()
-    .get();
-}
-
-function deleteQuestion(id: number) {
-  db.delete(quizOptions).where(eq(quizOptions.questionId, id)).run();
-  return db
-    .delete(quizQuestions)
-    .where(eq(quizQuestions.id, id))
     .returning()
     .get();
 }
@@ -629,7 +599,10 @@ export default function QuizBuilderWizard({
                                 placeholder="Enter question text..."
                               />
                               <div className="flex items-center gap-2">
-                                <Label className="text-xs text-muted-foreground">
+                                <Label
+                                  htmlFor={`question-type-${q.id}`}
+                                  className="text-xs text-muted-foreground"
+                                >
                                   Type:
                                 </Label>
                                 <Select
@@ -640,7 +613,10 @@ export default function QuizBuilderWizard({
                                     })
                                   }
                                 >
-                                  <SelectTrigger className="w-48">
+                                  <SelectTrigger
+                                    id={`question-type-${q.id}`}
+                                    className="w-48"
+                                  >
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
@@ -948,8 +924,8 @@ export default function QuizBuilderWizard({
                   Please fix these issues before saving:
                 </p>
                 <ul className="list-inside list-disc space-y-1 text-sm text-destructive">
-                  {validationErrors.map((err, i) => (
-                    <li key={i}>{err}</li>
+                  {Array.from(new Set(validationErrors)).map((err) => (
+                    <li key={err}>{err}</li>
                   ))}
                 </ul>
               </div>

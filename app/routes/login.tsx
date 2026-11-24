@@ -1,15 +1,21 @@
-import { Form, Link, useActionData, useNavigation, useSearchParams } from "react-router";
+import { eq } from "drizzle-orm";
+import {
+  Form,
+  Link,
+  useActionData,
+  useNavigation,
+  useSearchParams,
+} from "react-router";
 import { redirect, data } from "react-router";
 import { z } from "zod";
-import type { Route } from "./+types/login";
-import { setCurrentUserId, getCurrentUserId } from "~/lib/session";
-import { parseFormData } from "~/lib/validation";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { Card, CardContent } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
 import { db } from "~/db";
 import { users } from "~/db/schema";
-import { eq } from "drizzle-orm";
+import { setCurrentUserId, getCurrentUserId } from "~/lib/session";
+import { parseFormData } from "~/lib/validation";
+import type { Route } from "./+types/login";
 
 const loginSchema = z.object({
   email: z
@@ -31,7 +37,8 @@ export async function loader({ request, url }: Route.LoaderArgs) {
   const currentUserId = await getCurrentUserId(request);
   if (currentUserId) {
     const redirectTo = url.searchParams.get("redirectTo");
-    const destination = redirectTo && redirectTo.startsWith("/") ? redirectTo : "/courses";
+    const destination =
+      redirectTo && redirectTo.startsWith("/") ? redirectTo : "/courses";
     throw redirect(destination);
   }
   return {};
@@ -43,7 +50,10 @@ export async function action({ request, url }: Route.ActionArgs) {
 
   if (!parsed.success) {
     return data(
-      { errors: parsed.errors, values: { email: String(formData.get("email") ?? "") } },
+      {
+        errors: parsed.errors,
+        values: { email: String(formData.get("email") ?? "") },
+      },
       { status: 400 }
     );
   }
@@ -62,7 +72,8 @@ export async function action({ request, url }: Route.ActionArgs) {
   }
 
   const redirectTo = url.searchParams.get("redirectTo");
-  const destination = redirectTo && redirectTo.startsWith("/") ? redirectTo : "/courses";
+  const destination =
+    redirectTo && redirectTo.startsWith("/") ? redirectTo : "/courses";
 
   const cookie = await setCurrentUserId(request, user.id);
   throw redirect(destination, {
@@ -113,7 +124,11 @@ export default function Login() {
                     {actionData.errors.email}{" "}
                     {actionData.errors.email.includes("No account") && (
                       <Link
-                        to={redirectTo ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}` : "/signup"}
+                        to={
+                          redirectTo
+                            ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}`
+                            : "/signup"
+                        }
                         className="font-medium text-primary hover:underline"
                       >
                         Sign up instead
@@ -123,11 +138,7 @@ export default function Login() {
                 )}
               </div>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isSubmitting}
-              >
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
                 {isSubmitting ? "Logging in..." : "Log In"}
               </Button>
             </Form>
@@ -137,7 +148,11 @@ export default function Login() {
         <p className="mt-4 text-center text-sm text-muted-foreground">
           Don't have an account?{" "}
           <Link
-            to={redirectTo ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}` : "/signup"}
+            to={
+              redirectTo
+                ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}`
+                : "/signup"
+            }
             className="font-medium text-primary hover:underline"
           >
             Sign up

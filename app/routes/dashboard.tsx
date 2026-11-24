@@ -1,5 +1,22 @@
+import { inArray, eq, and, sql } from "drizzle-orm";
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  GraduationCap,
+  PlayCircle,
+} from "lucide-react";
 import { Link } from "react-router";
-import type { Route } from "./+types/dashboard";
+import { isRouteErrorResponse } from "react-router";
+import { CourseImage } from "~/components/course-image";
+import { Button } from "~/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
 import { db } from "~/db";
 import {
   enrollments,
@@ -9,14 +26,8 @@ import {
   lessonProgress,
   LessonProgressStatus,
 } from "~/db/schema";
-import { eq, and, or, sql } from "drizzle-orm";
 import { people } from "~/modules/permissions/person.server";
-import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, CheckCircle2, GraduationCap, PlayCircle } from "lucide-react";
-import { CourseImage } from "~/components/course-image";
-import { data, isRouteErrorResponse } from "react-router";
+import type { Route } from "./+types/dashboard";
 
 function getUserEnrolledCourses(userId: number) {
   return db
@@ -48,7 +59,12 @@ function getCourseLessonIds(courseId: number): number[] {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   return courseLessons.map((l) => l.id);
@@ -83,7 +99,7 @@ function calculateProgress(
         durationMinutes: lessons.durationMinutes,
       })
       .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
+      .where(inArray(lessons.id, lessonIds))
       .all();
 
     const totalDuration = courseLessons.reduce(
@@ -100,7 +116,7 @@ function calculateProgress(
         and(
           eq(lessonProgress.userId, userId),
           eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+          inArray(lessonProgress.lessonId, lessonIds)
         )
       )
       .all();
@@ -121,7 +137,7 @@ function calculateProgress(
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -140,7 +156,7 @@ function getCompletedLessonCount(userId: number, courseId: number) {
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -194,7 +210,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const enrolledCourses = getUserEnrolledCourses(currentUserId);
 
   const coursesWithProgress = enrolledCourses.map((enrollment) => {
-    const progress = calculateProgress(currentUserId, enrollment.courseId, false);
+    const progress = calculateProgress(
+      currentUserId,
+      enrollment.courseId,
+      false
+    );
     const completedLessons = getCompletedLessonCount(
       currentUserId,
       enrollment.courseId
@@ -253,7 +273,7 @@ export function HydrateFallback() {
       </div>
       <Skeleton className="mb-4 h-6 w-32" />
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
+        {[1, 2, 3].map((i) => (
           <DashboardCardSkeleton key={i} />
         ))}
       </div>
@@ -302,8 +322,14 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               <h2 className="mb-4 text-xl font-semibold">In Progress</h2>
               <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {inProgressCourses.map((course) => (
-                  <Card key={course.enrollmentId} className="flex flex-col overflow-hidden pt-0">
-                    <Link to={`/courses/${course.courseSlug}`} className="aspect-video overflow-hidden">
+                  <Card
+                    key={course.enrollmentId}
+                    className="flex flex-col overflow-hidden pt-0"
+                  >
+                    <Link
+                      to={`/courses/${course.courseSlug}`}
+                      className="aspect-video overflow-hidden"
+                    >
                       <CourseImage
                         src={course.coverImageUrl}
                         alt={course.courseTitle}
@@ -371,8 +397,14 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               <h2 className="mb-4 text-xl font-semibold">Completed</h2>
               <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {completedCourses.map((course) => (
-                  <Card key={course.enrollmentId} className="flex flex-col overflow-hidden pt-0">
-                    <Link to={`/courses/${course.courseSlug}`} className="relative aspect-video overflow-hidden">
+                  <Card
+                    key={course.enrollmentId}
+                    className="flex flex-col overflow-hidden pt-0"
+                  >
+                    <Link
+                      to={`/courses/${course.courseSlug}`}
+                      className="relative aspect-video overflow-hidden"
+                    >
                       <CourseImage
                         src={course.coverImageUrl}
                         alt={course.courseTitle}
@@ -396,9 +428,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
                     <CardContent className="flex-1">
                       <div className="flex items-center gap-2 text-sm text-green-600">
                         <CheckCircle2 className="size-4" />
-                        <span>
-                          Completed — {course.totalLessons} lessons
-                        </span>
+                        <span>Completed — {course.totalLessons} lessons</span>
                       </div>
                     </CardContent>
                     <CardFooter>
@@ -430,7 +460,10 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   if (isRouteErrorResponse(error)) {
     if (error.status === 401) {
       title = "Sign in required";
-      message = typeof error.data === "string" ? error.data : "Please select a user from the DevUI panel.";
+      message =
+        typeof error.data === "string"
+          ? error.data
+          : "Please select a user from the DevUI panel.";
     } else {
       title = `Error ${error.status}`;
       message = typeof error.data === "string" ? error.data : error.statusText;

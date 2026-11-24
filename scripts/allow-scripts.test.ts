@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe,expect,it } from "vitest";
 import { z } from "zod";
 
 // npm only runs the install scripts listed in package.json `allowScripts`.

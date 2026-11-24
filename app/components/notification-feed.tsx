@@ -1,15 +1,4 @@
 import {
-  createContext,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
-import { Link, useNavigate } from "react-router";
-import { z } from "zod";
-import {
   Bell,
   Check,
   GraduationCap,
@@ -18,7 +7,18 @@ import {
   Settings,
   UsersRound,
 } from "lucide-react";
-import { cn } from "~/lib/utils";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { Link, useNavigate } from "react-router";
+import { z } from "zod";
 import { UserAvatar } from "~/components/user-avatar";
 import {
   badgeLabel,
@@ -29,6 +29,7 @@ import {
   type FeedState,
   type NotificationFeed,
 } from "~/lib/notification-feed";
+import { cn } from "~/lib/utils";
 
 // ─── Notification Feed ───
 // The bell in the sidebar header and its popover (variant A2 from
@@ -50,9 +51,11 @@ export function NotificationFeedProvider({
   children: ReactNode;
 }) {
   const [feed, setFeed] = useState<NotificationFeed>(emptyNotificationFeed);
+  const currentCredentials = useEffectEvent(() => credentials);
   const userId = credentials?.userId;
 
   useEffect(() => {
+    const credentials = currentCredentials();
     if (!credentials) {
       setFeed(emptyNotificationFeed());
       return;
@@ -139,7 +142,12 @@ export function NotificationBell() {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <button
+            type="button"
+            className="fixed inset-0 z-40"
+            aria-label="Close notifications"
+            onClick={() => setOpen(false)}
+          />
           <NotificationPopover
             feed={feed}
             state={state}

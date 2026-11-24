@@ -1,14 +1,14 @@
+import { eq } from "drizzle-orm";
 import { data, redirect } from "react-router";
 import { z } from "zod";
-import type { Route } from "./+types/courses.$slug.refund";
-import { people } from "~/modules/permissions/person.server";
 import { db } from "~/db";
 import { courses, purchases } from "~/db/schema";
-import { eq } from "drizzle-orm";
-import { parseFormData, parseParams } from "~/lib/validation";
-import { raiseRefundRequest } from "~/lib/refunds.server";
-import { defaultNotifications } from "~/lib/notifications.server";
 import { sendEmail } from "~/lib/mailer.server";
+import { defaultNotifications } from "~/lib/notifications.server";
+import { raiseRefundRequest } from "~/lib/refunds.server";
+import { formId, parseFormData, parseParams } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/courses.$slug.refund";
 
 const refundParamsSchema = z.object({
   slug: z.string().min(1),
@@ -18,7 +18,7 @@ const refundActionSchema = z.object({
   // A Refund Request is for one specific Purchase, which the buyer picks —
   // their Individual Purchase from the course page, or a Team Licence from
   // the team page.
-  purchaseId: z.coerce.number().int(),
+  purchaseId: formId,
   reason: z
     .string()
     .trim()

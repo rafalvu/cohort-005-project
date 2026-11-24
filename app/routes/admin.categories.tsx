@@ -1,17 +1,4 @@
-import { useState, useRef, useEffect } from "react";
-import { useFetcher } from "react-router";
-import { toast } from "sonner";
-import { z } from "zod";
-import type { Route } from "./+types/admin.categories";
-import { people } from "~/modules/permissions/person.server";
-import { parseFormData } from "~/lib/validation";
-import { categories, courses } from "~/db/schema";
-import { db } from "~/db";
 import { eq, sql } from "drizzle-orm";
-import { Card, CardContent } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
-import { Skeleton } from "~/components/ui/skeleton";
 import {
   AlertTriangle,
   BookOpen,
@@ -20,7 +7,20 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { useFetcher } from "react-router";
 import { data, isRouteErrorResponse, Link } from "react-router";
+import { toast } from "sonner";
+import { z } from "zod";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Input } from "~/components/ui/input";
+import { Skeleton } from "~/components/ui/skeleton";
+import { db } from "~/db";
+import { categories, courses } from "~/db/schema";
+import { formId, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/admin.categories";
 
 const adminCategoryActionSchema = z.discriminatedUnion("intent", [
   z.object({
@@ -29,12 +29,12 @@ const adminCategoryActionSchema = z.discriminatedUnion("intent", [
   }),
   z.object({
     intent: z.literal("update"),
-    categoryId: z.coerce.number().int(),
+    categoryId: formId,
     name: z.string().trim().min(1, "Category name cannot be empty."),
   }),
   z.object({
     intent: z.literal("delete"),
-    categoryId: z.coerce.number().int(),
+    categoryId: formId,
   }),
 ]);
 
@@ -215,7 +215,7 @@ function CreateCategoryRow({ onClose }: { onClose: () => void }) {
     if (fetcher.state === "idle" && fetcher.data?.error) {
       toast.error(fetcher.data.error);
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, onClose]);
 
   function handleSave() {
     const trimmed = name.trim();
@@ -478,7 +478,7 @@ export function HydrateFallback() {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: 4 }).map((_, i) => (
+                {[1, 2, 3, 4].map((i) => (
                   <TableRowSkeleton key={i} />
                 ))}
               </tbody>

@@ -7,13 +7,13 @@ import {
   isEnrolled,
   notifyInstructorOfEnrollment,
 } from "~/lib/enrollments.server";
-import { getSeatAvailability } from "~/lib/refunds.server";
 import {
   sendSafely,
   findNotificationPerson,
   type Notifications,
 } from "~/lib/notifications.server";
 import { checkCountryLock } from "~/lib/ppp";
+import { getSeatAvailability } from "~/lib/refunds.server";
 
 export type Db = BetterSQLite3Database<typeof schema>;
 

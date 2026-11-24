@@ -1,32 +1,4 @@
-import { useEffect, useState } from "react";
-import { Link, useFetcher, useSearchParams } from "react-router";
-import { toast } from "sonner";
-import { z } from "zod";
-import type { Route } from "./+types/courses.$slug";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { db } from "~/db";
-import {
-  courses,
-  categories,
-  users,
-  modules,
-  lessons,
-  lessonProgress,
-  courseRatings,
-  LessonProgressStatus,
-} from "~/db/schema";
-import { eq, and, or, sql } from "drizzle-orm";
-import { getRefundOffer, type RefundOffer } from "~/lib/refunds.server";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-  TabsContentNoShift,
-} from "~/components/ui/tabs";
+import { inArray, eq, and, sql } from "drizzle-orm";
 import {
   AlertTriangle,
   BookOpen,
@@ -38,17 +10,46 @@ import {
   ShieldAlert,
   Users,
 } from "lucide-react";
-import { CourseImage } from "~/components/course-image";
-import { UserAvatar } from "~/components/user-avatar";
-import { Textarea } from "~/components/ui/textarea";
+import { useEffect, useState } from "react";
+import { Link, useFetcher, useSearchParams } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
-import { formatDuration, formatPrice } from "~/lib/utils";
-import { renderMarkdown } from "~/lib/markdown.server";
-import { resolveCountry } from "~/lib/country.server";
-import { calculatePppPrice, countryName, getCountryTierInfo } from "~/lib/ppp";
-import { parseFormData } from "~/lib/validation";
-import { MAX_RATING, MIN_RATING } from "~/lib/ratings";
+import { toast } from "sonner";
+import { z } from "zod";
+import { CourseImage } from "~/components/course-image";
+import { RenderedHtmlBlock } from "~/components/rendered-html";
 import { StarRating, StarRatingInput } from "~/components/star-rating";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  TabsContentNoShift,
+} from "~/components/ui/tabs";
+import { Textarea } from "~/components/ui/textarea";
+import { UserAvatar } from "~/components/user-avatar";
+import { db } from "~/db";
+import {
+  courses,
+  categories,
+  users,
+  modules,
+  lessons,
+  lessonProgress,
+  courseRatings,
+  LessonProgressStatus,
+} from "~/db/schema";
+import { resolveCountry } from "~/lib/country.server";
+import { renderMarkdown } from "~/lib/markdown.server";
+import { calculatePppPrice, countryName, getCountryTierInfo } from "~/lib/ppp";
+import { MAX_RATING, MIN_RATING } from "~/lib/ratings";
+import { getRefundOffer, type RefundOffer } from "~/lib/refunds.server";
+import { formatDuration, formatPrice } from "~/lib/utils";
+import { parseFormData } from "~/lib/validation";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/courses.$slug";
 
 function getCourseWithDetails(id: number) {
   const course = db
@@ -93,7 +94,7 @@ function getCourseWithDetails(id: number) {
       ? db
           .select()
           .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
+          .where(inArray(lessons.moduleId, moduleIds))
           .orderBy(lessons.position)
           .all()
       : [];
@@ -119,7 +120,12 @@ function getLessonCountForCourse(courseId: number) {
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .get();
 
   return count?.count ?? 0;
@@ -137,7 +143,12 @@ function getCourseLessonIds(courseId: number): number[] {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   return courseLessons.map((l) => l.id);
@@ -159,7 +170,7 @@ function calculateProgress(
         durationMinutes: lessons.durationMinutes,
       })
       .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
+      .where(inArray(lessons.id, lessonIds))
       .all();
 
     const totalDuration = courseLessons.reduce(
@@ -176,7 +187,7 @@ function calculateProgress(
         and(
           eq(lessonProgress.userId, userId),
           eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+          inArray(lessonProgress.lessonId, lessonIds)
         )
       )
       .all();
@@ -197,7 +208,7 @@ function calculateProgress(
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -217,7 +228,12 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   if (courseLessons.length === 0) return [];
@@ -228,7 +244,10 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
     .where(
       and(
         eq(lessonProgress.userId, userId),
-        or(...courseLessons.map((l) => eq(lessonProgress.lessonId, l.id)))!
+        inArray(
+          lessonProgress.lessonId,
+          courseLessons.map((l) => l.id)
+        )
       )
     )
     .all();
@@ -491,7 +510,7 @@ export function HydrateFallback() {
       </div>
       <Skeleton className="mb-4 h-8 w-40" />
       <div className="space-y-4">
-        {Array.from({ length: 3 }).map((_, i) => (
+        {[1, 2, 3].map((i) => (
           <Card key={i}>
             <CardHeader>
               <Skeleton className="h-5 w-48" />
@@ -499,7 +518,7 @@ export function HydrateFallback() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {Array.from({ length: 4 }).map((_, j) => (
+                {[1, 2, 3, 4].map((j) => (
                   <Skeleton key={j} className="h-8 w-full" />
                 ))}
               </div>
@@ -681,9 +700,9 @@ export default function CourseDetail({ loaderData }: Route.ComponentProps) {
       <div className="grid gap-8 lg:grid-cols-3">
         {/* Left column: sales copy + course content */}
         <div className="lg:col-span-2">
-          <div
+          <RenderedHtmlBlock
             className="prose prose-neutral dark:prose-invert max-w-none"
-            dangerouslySetInnerHTML={{ __html: salesCopyHtml }}
+            html={salesCopyHtml}
           />
 
           {/* Bottom CTA */}

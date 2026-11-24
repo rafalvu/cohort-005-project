@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
+import { describe, it, expect, beforeEach } from "vitest";
 import * as schema from "~/db/schema";
 import { CourseStatus, LessonProgressStatus, UserRole } from "~/db/schema";
 import { markdown } from "~/lib/text";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import {
   createInstructorAnalytics,
   type AnalyticsViewer,

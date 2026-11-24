@@ -1,7 +1,7 @@
-import { useState } from "react";
 import { Star } from "lucide-react";
-import { cn } from "~/lib/utils";
+import { useState } from "react";
 import { MAX_RATING } from "~/lib/ratings";
+import { cn } from "~/lib/utils";
 
 const STARS = Array.from({ length: MAX_RATING }, (_, i) => i + 1);
 
@@ -41,10 +41,7 @@ export function StarRating({
     >
       <span className="flex items-center">
         {STARS.map((star) => {
-          const fillPercent = Math.max(
-            0,
-            Math.min(1, average - (star - 1))
-          );
+          const fillPercent = Math.max(0, Math.min(1, average - (star - 1)));
           return (
             <span key={star} className="relative">
               <Star className={cn(starSize, "text-muted-foreground/40")} />
@@ -103,10 +100,7 @@ export function StarRatingInput({
   const active = hovered ?? value ?? 0;
 
   return (
-    <span
-      className={cn("flex items-center gap-0.5", className)}
-      onMouseLeave={() => setHovered(null)}
-    >
+    <span className={cn("flex items-center gap-0.5", className)}>
       {STARS.map((star) => (
         <button
           key={star}
@@ -115,6 +109,7 @@ export function StarRatingInput({
           value={star}
           disabled={disabled}
           onMouseEnter={() => setHovered(star)}
+          onMouseLeave={() => setHovered(null)}
           onFocus={() => setHovered(star)}
           onBlur={() => setHovered(null)}
           aria-label={`Rate ${star} out of ${MAX_RATING}`}

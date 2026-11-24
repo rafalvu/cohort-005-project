@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import * as schema from "~/db/schema";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { enrollStudent, isEnrolled } from "./enrollments.server";
-import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 import {
   fakeNotifications,
   type FakeNotifications,
 } from "./notifications.fake.server";
+import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
 
@@ -187,7 +187,7 @@ describe("the new Enrollment Notification", () => {
     expect(isEnrolled(db, base.user.id, base.course.id)).toBe(true);
     expect(consoleError).toHaveBeenCalledWith(
       expect.stringContaining("enrollment:"),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     consoleError.mockRestore();
   });

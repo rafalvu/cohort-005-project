@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
 import zlib from "node:zlib";
-import { decodeRequestBody, renderMarkdown } from "./render";
+import { describe,it,expect } from "vitest";
+import { decodeRequestBody,renderMarkdown } from "./render";
 
 const BASE = {
   timestamp: "2026-08-06T10:00:00.000Z",
@@ -54,8 +54,8 @@ describe("decodeRequestBody", () => {
   });
 
   it("fails loudly, naming the Node version, when the runtime has no zstd support", () => {
-    const original = (zlib as any).zstdDecompressSync;
-    delete (zlib as any).zstdDecompressSync;
+    const original = zlib.zstdDecompressSync;
+    Reflect.deleteProperty(zlib, "zstdDecompressSync");
     try {
       const compressed = zlib.zstdCompressSync(Buffer.from("hello"));
       const out = decodeRequestBody(compressed, "zstd");
@@ -63,7 +63,7 @@ describe("decodeRequestBody", () => {
       expect(out).toContain("zstd");
       expect(out).toContain(process.version);
     } finally {
-      (zlib as any).zstdDecompressSync = original;
+      zlib.zstdDecompressSync = original;
     }
   });
 });
@@ -459,12 +459,13 @@ describe("renderMarkdown header redaction", () => {
       ...BASE,
       agent: "Gemini CLI",
       renderer: "gemini",
-      headers: { authorization: "Bearer secret-token" },
+      headers: { authorization: "Bearer secret-token", Cookie: "session=cookie-fixture" },
       path: "/v1beta/models/gemini-2.5-pro:generateContent",
       requestBody: body(GEMINI_REQUEST),
       responseRaw: "",
     });
     expect(out).not.toContain("secret-token");
+    expect(out).not.toContain("cookie-fixture");
     expect(out).toContain("[REDACTED]");
   });
 

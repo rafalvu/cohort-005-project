@@ -17,12 +17,15 @@ const migrationsFolder = path.resolve(__dirname, "../../drizzle");
  * Uses the same Drizzle migrations as the live database, ensuring
  * test and production schemas are always in sync.
  */
-export function createTestDb() {
+export function createTestDb(onQuery?: (query: string) => void) {
   const sqlite = new Database(":memory:");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
-  const testDb = drizzle(sqlite, { schema });
+  const testDb = drizzle(sqlite, {
+    schema,
+    logger: onQuery ? { logQuery: onQuery } : undefined,
+  });
 
   migrate(testDb, { migrationsFolder });
 

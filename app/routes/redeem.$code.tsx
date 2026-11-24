@@ -1,27 +1,27 @@
-import { Link, useFetcher, redirect } from "react-router";
+import { eq } from "drizzle-orm";
+import { Ticket, AlertCircle, CheckCircle2, Globe } from "lucide-react";
 import { useEffect } from "react";
+import { Link, useFetcher, redirect } from "react-router";
+import { data } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/redeem.$code";
-import { people } from "~/modules/permissions/person.server";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { db } from "~/db";
+import { coupons, courses } from "~/db/schema";
 import { resolveCountry } from "~/lib/country.server";
-import { parseParams, parseFormData } from "~/lib/validation";
-import { getSeatAvailability } from "~/lib/refunds.server";
 import { isEnrolled } from "~/lib/enrollments.server";
 import { defaultNotifications } from "~/lib/notifications.server";
+import { getSeatAvailability } from "~/lib/refunds.server";
 import {
   claimSeat,
   isSeatCountryLocked,
   SEAT_ON_HOLD,
   SEAT_REFUNDED,
 } from "~/lib/seat-claims.server";
-import { Card, CardContent } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Ticket, AlertCircle, CheckCircle2, Globe } from "lucide-react";
-import { data } from "react-router";
-import { db } from "~/db";
-import { coupons, courses } from "~/db/schema";
-import { eq } from "drizzle-orm";
+import { parseParams, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/redeem.$code";
 
 function getCourseById(id: number) {
   return db.select().from(courses).where(eq(courses.id, id)).get();
@@ -153,7 +153,10 @@ export default function Redeem({
 
   // Determine which state to show
   const canRedeem =
-    !alreadyRedeemed && !alreadyEnrolled && !countryMismatch && !unavailableReason;
+    !alreadyRedeemed &&
+    !alreadyEnrolled &&
+    !countryMismatch &&
+    !unavailableReason;
 
   return (
     <div className="mx-auto max-w-2xl p-6 lg:p-8">

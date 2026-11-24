@@ -1,6 +1,6 @@
-import { data } from "react-router";
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { data } from "react-router";
 import type * as schema from "~/db/schema";
 import { UserRole, users } from "~/db/schema";
 import { resolveCountry } from "~/lib/country.server";

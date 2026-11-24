@@ -1,4 +1,14 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import {
+  notExists,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { alias } from "drizzle-orm/sqlite-core";
 import * as schema from "~/db/schema";
@@ -17,18 +27,19 @@ import {
   RefundStatus,
   UserRole,
 } from "~/db/schema";
-import { formatPrice } from "~/lib/utils";
 import {
   sendSafely,
   toNotificationPerson,
   type Notifications,
 } from "~/lib/notifications.server";
+import { PAGE_SIZE, pageOf } from "~/lib/pagination";
 import {
   REFUND_COMPLETION_LIMIT,
   REFUND_WATCH_LIMIT_SECONDS,
   REFUND_WINDOW_DAYS,
   type RuleBreak,
 } from "~/lib/refund-rules";
+import { formatPrice } from "~/lib/utils";
 
 // docs/adr/0001–0004 explain why Refunds work the way they do.
 
@@ -99,17 +110,25 @@ export function getNewestIndividualPurchase(
   buyerId: number,
   courseId: number
 ): Purchase | null {
-  const newestFirst = db
-    .select()
-    .from(purchases)
-    .where(and(eq(purchases.userId, buyerId), eq(purchases.courseId, courseId)))
-    .orderBy(desc(purchases.createdAt), desc(purchases.id))
-    .all();
-
   return (
-    newestFirst.find(
-      (purchase) => kindOf(getSeats(db, purchase.id)) === "individual_purchase"
-    ) ?? null
+    db
+      .select()
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.userId, buyerId),
+          eq(purchases.courseId, courseId),
+          notExists(
+            db
+              .select({ id: coupons.id })
+              .from(coupons)
+              .where(eq(coupons.purchaseId, purchases.id))
+          )
+        )
+      )
+      .orderBy(desc(purchases.createdAt), desc(purchases.id))
+      .limit(1)
+      .get() ?? null
   );
 }
 
@@ -146,63 +165,6 @@ export function getSeatAvailability(
 
 // ─── Figures and rules ───
 
-function getLessonIds(db: Queryable, courseId: number): number[] {
-  return db
-    .select({ id: lessons.id })
-    .from(lessons)
-    .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .where(eq(modules.courseId, courseId))
-    .all()
-    .map((row) => row.id);
-}
-
-function getCompletedLessonCount(
-  db: Queryable,
-  userId: number,
-  lessonIds: number[]
-) {
-  if (lessonIds.length === 0) return 0;
-
-  const result = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.status, LessonProgressStatus.Completed),
-        inArray(lessonProgress.lessonId, lessonIds)
-      )
-    )
-    .get();
-
-  return result?.count ?? 0;
-}
-
-function getSecondsWatched(db: Queryable, userId: number, lessonIds: number[]) {
-  if (lessonIds.length === 0) return 0;
-
-  const furthestPerLesson = db
-    .select({
-      furthest: sql<number>`max(${videoWatchEvents.positionSeconds})`,
-    })
-    .from(videoWatchEvents)
-    .where(
-      and(
-        eq(videoWatchEvents.userId, userId),
-        inArray(videoWatchEvents.lessonId, lessonIds)
-      )
-    )
-    .groupBy(videoWatchEvents.lessonId)
-    .all();
-
-  return furthestPerLesson.reduce((total, row) => total + row.furthest, 0);
-}
-
-/**
- * How far the buyer has got with what they bought. For an Individual Purchase
- * that is their own progress. A Team Licence gives its buyer nothing to watch,
- * so for one it is how many of its Seats have been claimed.
- */
 export type RefundFigures =
   | {
       kind: "individual_purchase";
@@ -216,31 +178,65 @@ export type RefundFigures =
       claimedSeatCount: number;
     };
 
-function getRefundFigures(db: Queryable, purchase: Purchase): RefundFigures {
-  const seats = getSeats(db, purchase.id);
-
-  if (kindOf(seats) === "team_licence") {
-    return {
-      kind: "team_licence",
-      seatCount: seats.length,
-      claimedSeatCount: seats.filter(isClaimed).length,
-    };
-  }
-
-  const lessonIds = getLessonIds(db, purchase.courseId);
-  return {
-    kind: "individual_purchase",
-    lessonsCompleted: getCompletedLessonCount(db, purchase.userId, lessonIds),
-    lessonCount: lessonIds.length,
-    secondsWatched: getSecondsWatched(db, purchase.userId, lessonIds),
+function figuresForPurchases(db: Queryable, purchaseIds: number[]) {
+  // Each scalar subquery is scoped to the buyer/course or purchase in the page.
+  // Watch time is the furthest position per lesson, summed across the course.
+  const courseLessonIds = db
+    .select({ id: lessons.id })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(modules.courseId, purchases.courseId));
+  type Counts = {
+    id: number;
+    seats: number;
+    claimed: number;
+    lessons: number;
+    completed: number;
+    watched: number;
   };
+  const rows = db.all<Counts>(sql`
+    SELECT ${purchases.id} as id,
+      (SELECT count(*) FROM ${coupons} WHERE ${coupons.purchaseId} = ${purchases.id}) AS seats,
+      (SELECT count(*) FROM ${coupons} WHERE ${coupons.purchaseId} = ${purchases.id} AND ${coupons.redeemedAt} IS NOT NULL) AS claimed,
+      (SELECT count(*) FROM (${courseLessonIds})) AS lessons,
+      (SELECT count(*) FROM ${lessonProgress} WHERE ${lessonProgress.userId} = ${purchases.userId}
+        AND ${lessonProgress.status} = ${LessonProgressStatus.Completed} AND ${inArray(lessonProgress.lessonId, courseLessonIds)}) AS completed,
+      (SELECT coalesce(sum(furthest),0) FROM (
+        SELECT max(${videoWatchEvents.positionSeconds}) AS furthest FROM ${videoWatchEvents}
+        WHERE ${videoWatchEvents.userId} = ${purchases.userId} AND ${inArray(videoWatchEvents.lessonId, courseLessonIds)}
+        GROUP BY ${videoWatchEvents.lessonId})) AS watched
+    FROM ${purchases} WHERE ${inArray(purchases.id, purchaseIds)}
+  `);
+  return new Map(
+    rows.map((row): [number, RefundFigures] => [
+      row.id,
+      row.seats
+        ? {
+            kind: "team_licence",
+            seatCount: row.seats,
+            claimedSeatCount: row.claimed,
+          }
+        : {
+            kind: "individual_purchase",
+            lessonCount: row.lessons,
+            lessonsCompleted: row.completed,
+            secondsWatched: row.watched,
+          },
+    ])
+  );
+}
+
+function requireFigures(figures: Map<number, RefundFigures>, id: number) {
+  const result = figures.get(id);
+  if (!result)
+    throw new Error("Purchase disappeared while reading its refund figures");
+  return result;
 }
 
 /** What the buyer is told when they can't raise a Refund Request. */
 const RULE_BREAK_ERRORS: Record<RuleBreak, string> = {
   window_closed: `The ${REFUND_WINDOW_DAYS}-day window has closed.`,
-  watched_too_much:
-    "You have watched too much of this course to get a refund.",
+  watched_too_much: "You have watched too much of this course to get a refund.",
   completed_too_much:
     "You have completed too much of this course to request a refund.",
   seat_claimed: "A Team Licence with a claimed Seat cannot be refunded.",
@@ -283,7 +279,11 @@ function findRuleBreaks(
 
 // ─── Raising a Refund Request ───
 
-export type Failure = { ok: false; status: 400 | 403 | 404 | 409; error: string };
+export type Failure = {
+  ok: false;
+  status: 400 | 403 | 404 | 409;
+  error: string;
+};
 
 type RefundCheck = { ok: true; purchase: Purchase } | Failure;
 
@@ -321,7 +321,7 @@ export function checkRefundRequest(
 
   const [firstBreak] = findRuleBreaks(
     purchase,
-    getRefundFigures(db, purchase),
+    requireFigures(figuresForPurchases(db, [purchase.id]), purchase.id),
     now
   );
 
@@ -517,46 +517,61 @@ export type RefundRequestForReview = {
 export function listRefundRequestsForReview(
   db: Queryable,
   status: RefundStatus,
-  now: Date
-): RefundRequestForReview[] {
+  now: Date,
+  page = 1
+) {
   const rows = selectRefundRequests(db)
     .where(eq(refunds.status, status))
     .orderBy(asc(refunds.requestedAt), asc(refunds.id))
+    .limit(PAGE_SIZE + 1)
+    .offset((page - 1) * PAGE_SIZE)
     .all();
 
-  return rows.map((row) => {
-    const figures = getRefundFigures(db, row.purchase);
-    const ruleBreaks = findRuleBreaks(
-      row.purchase,
-      figures,
-      new Date(row.requestedAt)
-    );
-    const msSincePurchase =
-      now.getTime() - new Date(row.purchase.createdAt).getTime();
+  const resultPage = pageOf(rows);
+  const figuresByPurchase = figuresForPurchases(
+    db,
+    resultPage.items.map((row) => row.purchase.id)
+  );
+  return {
+    hasNext: resultPage.hasNext,
+    items: resultPage.items.map((row): RefundRequestForReview => {
+      const figures = requireFigures(figuresByPurchase, row.purchase.id);
+      const ruleBreaks = findRuleBreaks(
+        row.purchase,
+        figures,
+        new Date(row.requestedAt)
+      );
+      const msSincePurchase =
+        now.getTime() - new Date(row.purchase.createdAt).getTime();
 
-    return {
-      id: row.id,
-      status: row.status,
-      reason: row.reason,
-      decisionNote: row.decisionNote,
-      requestedAt: row.requestedAt,
-      resolvedAt: row.resolvedAt,
-      decidedByName: row.decidedByName,
-      buyerName: row.buyerName,
-      buyerEmail: row.buyerEmail,
-      courseTitle: row.courseTitle,
-      courseSlug: row.courseSlug,
-      amountPaid: row.purchase.amountPaid,
-      purchasedAt: row.purchase.createdAt,
-      daysSincePurchase: Math.max(0, Math.floor(msSincePurchase / 86_400_000)),
-      figures,
-      ruleBreaks,
-      // A Claimed Seat belongs to another student, so the only way out of
-      // that request is a decline. See docs/adr/0003.
-      canApprove:
-        row.status === RefundStatus.Open && !ruleBreaks.includes("seat_claimed"),
-    };
-  });
+      return {
+        id: row.id,
+        status: row.status,
+        reason: row.reason,
+        decisionNote: row.decisionNote,
+        requestedAt: row.requestedAt,
+        resolvedAt: row.resolvedAt,
+        decidedByName: row.decidedByName,
+        buyerName: row.buyerName,
+        buyerEmail: row.buyerEmail,
+        courseTitle: row.courseTitle,
+        courseSlug: row.courseSlug,
+        amountPaid: row.purchase.amountPaid,
+        purchasedAt: row.purchase.createdAt,
+        daysSincePurchase: Math.max(
+          0,
+          Math.floor(msSincePurchase / 86_400_000)
+        ),
+        figures,
+        ruleBreaks,
+        // A Claimed Seat belongs to another student, so the only way out of
+        // that request is a decline. See docs/adr/0003.
+        canApprove:
+          row.status === RefundStatus.Open &&
+          !ruleBreaks.includes("seat_claimed"),
+      };
+    }),
+  };
 }
 
 /** A buyer's own Refund Requests, newest first, for their Settings page. */
@@ -862,7 +877,11 @@ async function notifyDecision(
 
   const purchase = getPurchase(db, refundRequest.purchaseId);
   if (!purchase) return;
-  const buyer = db.select().from(users).where(eq(users.id, purchase.userId)).get();
+  const buyer = db
+    .select()
+    .from(users)
+    .where(eq(users.id, purchase.userId))
+    .get();
   const course = db
     .select()
     .from(courses)

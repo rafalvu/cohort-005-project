@@ -1,25 +1,6 @@
+import { AlertTriangle, Rocket } from "lucide-react";
 import { Link, isRouteErrorResponse, useSearchParams } from "react-router";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
-import type { Route } from "./+types/instructor.analytics";
-import { people } from "~/modules/permissions/person.server";
-import {
-  ANALYTICS_RANGES,
-  PLATFORM_FEE_PERCENT,
-  formatBucket,
-  formatMoney,
-} from "~/lib/analytics";
-import {
-  instructorAnalytics,
-  type CourseCountryRevenue,
-  type CourseFunnel,
-  type CourseProgressSummary,
-  type FunnelLesson,
-  type QuizPassRate,
-  type RefundExposure,
-  type RevenueSeries,
-} from "~/modules/instructor-analytics/index.server";
-import { countryName } from "~/lib/ppp";
-import { REFUND_WINDOW_DAYS } from "~/lib/refund-rules";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -37,7 +18,26 @@ import {
 } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
-import { AlertTriangle, Rocket } from "lucide-react";
+import {
+  ANALYTICS_RANGES,
+  PLATFORM_FEE_PERCENT,
+  formatBucket,
+  formatMoney,
+} from "~/lib/analytics";
+import { countryName } from "~/lib/ppp";
+import { REFUND_WINDOW_DAYS } from "~/lib/refund-rules";
+import {
+  instructorAnalytics,
+  type CourseCountryRevenue,
+  type CourseFunnel,
+  type CourseProgressSummary,
+  type FunnelLesson,
+  type QuizPassRate,
+  type RefundExposure,
+  type RevenueSeries,
+} from "~/modules/instructor-analytics/index.server";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/instructor.analytics";
 
 // ─── Instructor Analytics ───
 // What an instructor earned, and when. Three money figures rather than one:

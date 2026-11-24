@@ -1,50 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
-import { Link, useFetcher, useNavigate } from "react-router";
-import { toast } from "sonner";
-import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
-import {
-  coursePermissions,
-  type Capability,
-  type CourseRef,
-  type DenialReason,
-} from "~/modules/permissions/course-permissions.server";
-import { renderComment } from "~/lib/comment-markdown.server";
-import { markdown, type Markdown } from "~/lib/text";
-import {
-  createComment,
-  deleteComment,
-  editComment,
-} from "~/lib/comments.server";
-import { defaultNotifications } from "~/lib/notifications.server";
-import { isBookmarked, toggleBookmark } from "~/lib/bookmarks.server";
-import { getNote, saveNote } from "~/lib/notes.server";
-import { MAX_NOTE_LENGTH } from "~/lib/notes";
-import {
-  CommentThread,
-  type RenderedComment,
-} from "~/components/comment-thread";
-import { db } from "~/db";
-import {
-  categories,
-  comments,
-  courses,
-  lessonProgress,
-  lessons,
-  modules,
-  quizzes,
-  quizQuestions,
-  quizOptions,
-  quizAttempts,
-  quizAnswers,
-  users,
-  videoWatchEvents,
-  LessonProgressStatus,
-  UserRole,
-} from "~/db/schema";
-import { and, asc, desc, eq, or, sql } from "drizzle-orm";
-import { Button } from "~/components/ui/button";
-import { Card, CardContent } from "~/components/ui/card";
-import { Textarea } from "~/components/ui/textarea";
+import { inArray, and, asc, desc, eq, sql } from "drizzle-orm";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -65,13 +19,61 @@ import {
   Trophy,
   RotateCcw,
 } from "lucide-react";
-import { cn, formatDuration, formatRelativeTime } from "~/lib/utils";
-import { renderMarkdown } from "~/lib/markdown.server";
-import { YouTubePlayer } from "~/components/youtube-player";
+import { useState, useEffect, useCallback } from "react";
+import { Link, useFetcher, useNavigate } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
+import { toast } from "sonner";
 import { z } from "zod";
+import {
+  CommentThread,
+  type RenderedComment,
+} from "~/components/comment-thread";
+import { RenderedHtmlBlock } from "~/components/rendered-html";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Textarea } from "~/components/ui/textarea";
+import { YouTubePlayer } from "~/components/youtube-player";
+import { db } from "~/db";
+import {
+  categories,
+  comments,
+  courses,
+  lessonProgress,
+  lessons,
+  modules,
+  quizzes,
+  quizQuestions,
+  quizOptions,
+  quizAttempts,
+  quizAnswers,
+  users,
+  videoWatchEvents,
+  LessonProgressStatus,
+  UserRole,
+} from "~/db/schema";
+import { isBookmarked, toggleBookmark } from "~/lib/bookmarks.server";
+import { renderComment } from "~/lib/comment-markdown.server";
+import {
+  createComment,
+  deleteComment,
+  editComment,
+} from "~/lib/comments.server";
+import { logError } from "~/lib/log.server";
+import { renderMarkdown } from "~/lib/markdown.server";
+import { MAX_NOTE_LENGTH } from "~/lib/notes";
+import { getNote, saveNote } from "~/lib/notes.server";
+import { defaultNotifications } from "~/lib/notifications.server";
 import { countryName } from "~/lib/ppp";
-import { parseFormData } from "~/lib/validation";
+import { markdown, type Markdown } from "~/lib/text";
+import { cn, formatDuration, formatRelativeTime } from "~/lib/utils";
+import { formId, parseFormData } from "~/lib/validation";
+import {
+  coursePermissions,
+  type Capability,
+  type CourseRef,
+  type DenialReason,
+} from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/courses.$slug.lessons.$lessonId";
 
 const markCompleteSchema = z.object({
   intent: z.literal("mark-complete"),
@@ -80,12 +82,12 @@ const markCompleteSchema = z.object({
 const createCommentSchema = z.object({
   intent: z.literal("create-comment"),
   body: z.string(),
-  parentId: z.coerce.number().int().optional(),
+  parentId: formId.optional(),
 });
 
 const editCommentSchema = z.object({
   intent: z.literal("edit-comment"),
-  commentId: z.coerce.number().int(),
+  commentId: formId,
   body: z.string(),
 });
 
@@ -102,7 +104,7 @@ const saveNoteSchema = z.object({
 
 const deleteCommentSchema = z.object({
   intent: z.literal("delete-comment"),
-  commentId: z.coerce.number().int(),
+  commentId: formId,
 });
 
 type CommentAuthor = {
@@ -166,7 +168,7 @@ function getCourseWithDetails(id: number) {
       ? db
           .select()
           .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
+          .where(inArray(lessons.moduleId, moduleIds))
           .orderBy(lessons.position)
           .all()
       : [];
@@ -240,7 +242,12 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   if (courseLessons.length === 0) return [];
@@ -251,7 +258,10 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
     .where(
       and(
         eq(lessonProgress.userId, userId),
-        or(...courseLessons.map((l) => eq(lessonProgress.lessonId, l.id)))!
+        inArray(
+          lessonProgress.lessonId,
+          courseLessons.map((l) => l.id)
+        )
       )
     )
     .all();
@@ -469,24 +479,29 @@ function getBestAttempt(userId: number, quizId: number) {
     .get();
 }
 
-function calculateGrade(score: any): any {
-  try {
-    if (score >= 0.9) return "A";
-    if (score >= 0.8) return "B";
-    if (score >= 0.7) return "C";
-    if (score >= 0.6) return "D";
-    return "F";
-  } catch (e) {
-    console.log(e);
-    return "F";
-  }
+function calculateGrade(score: number) {
+  if (score >= 0.9) return "A";
+  if (score >= 0.8) return "B";
+  if (score >= 0.7) return "C";
+  if (score >= 0.6) return "D";
+  return "F";
 }
 
-function computeResult(userId: any, quizId: any, selectedAnswers: any): any {
+type QuestionResult = {
+  questionId: number;
+  correct: boolean;
+  selectedOptionId: number | null;
+  correctOptionId: number | null;
+};
+
+function computeResult(
+  userId: number,
+  quizId: number,
+  selectedAnswers: Record<number, number>
+) {
   try {
     const quiz = db.select().from(quizzes).where(eq(quizzes.id, quizId)).get();
     if (!quiz) {
-      console.log("quiz not found");
       return null;
     }
 
@@ -498,8 +513,8 @@ function computeResult(userId: any, quizId: any, selectedAnswers: any): any {
       .all();
 
     let correct = 0;
-    let total = questions.length;
-    const questionResults: any[] = [];
+    const total = questions.length;
+    const questionResults: QuestionResult[] = [];
 
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
@@ -586,7 +601,7 @@ function computeResult(userId: any, quizId: any, selectedAnswers: any): any {
       questionResults,
     };
   } catch (e) {
-    console.log(e);
+    logError("Quiz submission failed", e);
     return null;
   }
 }
@@ -697,7 +712,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
   let lessonStatus: string | null = null;
   let lastWatchPosition = 0;
   let watchProgress = 0;
-  let lessonProgressMap: Record<number, string> = {};
+  const lessonProgressMap: Record<number, string> = {};
 
   if (currentUserId) {
     // Progress is recorded only for people who can take the course, so a
@@ -1260,9 +1275,9 @@ function FullLesson({
 
           {/* Lesson Content */}
           {contentHtml && (
-            <div
+            <RenderedHtmlBlock
               className="prose prose-neutral dark:prose-invert mb-8 max-w-none"
-              dangerouslySetInnerHTML={{ __html: contentHtml }}
+              html={contentHtml}
             />
           )}
 

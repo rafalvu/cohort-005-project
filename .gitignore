@@ -33,3 +33,6 @@ reports/
 
 # Emails written locally instead of sent
 .outbox/
+
+/test-results/
+/playwright-report/
