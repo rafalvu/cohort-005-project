@@ -4,6 +4,7 @@
   "description": "An awesome course platform",
   "type": "module",
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
     "cherry-pick": "ai-hero-cli cherry-pick --branch=live-run-through --upstream=https://github.com/ai-hero-dev/cohort-005-project.git",
     "reset": "ai-hero-cli reset --branch=live-run-through --upstream=https://github.com/ai-hero-dev/cohort-005-project.git",
     "create-pr": "ai-hero-cli create-pr --branch=live-run-through --upstream=https://github.com/ai-hero-dev/cohort-005-project.git",
@@ -26,6 +27,7 @@
     "check": "npm run typecheck && npm run lint:boundaries && npm run test && npm run lint && npm run format:check && npm run check:repo && npm run check:client",
     "lint": "eslint app 'scripts/**/*.test.ts' 'request-logger/**/*.test.ts' --max-warnings 0",
     "format:check": "prettier --check app e2e .github/workflows eslint.config.mjs playwright.config.ts package.json .prettierrc .dependency-cruiser.cjs 'scripts/check-*.mjs'",
+    "check:staged": "node scripts/run-pre-commit.mjs",
     "check:repo": "node scripts/check-repository.mjs",
     "check:client": "node scripts/check-client-build.mjs",
     "test:browser": "playwright test"
