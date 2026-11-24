@@ -75,3 +75,26 @@ test("calculateTotal sums line items", () => {
   expect(calculateTotal([{ price: 10 }, { price: 5 }])).toBe(15);
 });
 ```
+
+## Test setup
+
+Arrange state through the module's public operations, just as you assert through
+its public read interface. For example, create an Enrollment with
+`enrollStudent` (or its synchronous transactional entry point), then exercise
+Bookmark and Note behavior. Check setup results so a refused operation cannot
+silently weaken the scenario.
+
+Prerequisite records with no service creation API use the typed factories in
+`app/test/fixtures.ts`; `app/test/setup.ts` owns migrated database creation and
+base fixtures. Keep those two files as the raw-write boundary. An exceptional
+historical state needs a narrowly named fixture documenting why a public
+operation cannot create it. Moving an available domain operation's SQL into a
+fixture does not satisfy this boundary.
+
+`app/test/database-access.test.ts` checks database calls through TypeScript's
+resolved signatures, including aliases and transaction callbacks. It runs with
+the normal test suite. For authorization regressions, use
+`createRouteHarness` from `app/test/routes.ts` with real route handlers, signed
+sessions and a migrated test database. Replace only the database connection;
+keep access checks and domain services real. These tests cover returned data and
+HTTP status, not browser layout or interaction.

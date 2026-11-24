@@ -1,8 +1,7 @@
+import { fixtureModule, fixtureLesson, fixturePerson } from "~/test/fixtures";
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
-import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
-import { plainText } from "~/lib/text";
 import { getNote, listNotes, saveNote } from "./notes.server";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
@@ -19,19 +18,19 @@ beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
 
-  const module = db
-    .insert(schema.modules)
-    .values({ courseId: base.course.id, title: "Basics", position: 1 })
-    .returning()
-    .get();
+  const module = fixtureModule(db, {
+    courseId: base.course.id,
+    title: "Basics",
+    position: 1,
+  });
 
   lessonIds = [1, 2].map(
     (position) =>
-      db
-        .insert(schema.lessons)
-        .values({ moduleId: module.id, title: `Lesson ${position}`, position })
-        .returning()
-        .get().id
+      fixtureLesson(db, {
+        moduleId: module.id,
+        title: `Lesson ${position}`,
+        position,
+      }).id
   );
 });
 
@@ -48,7 +47,13 @@ describe("saving a Note", () => {
 
   it("replaces the body and moves the last-edited time on when saved again", () => {
     saveNote(db, base.user.id, lessonIds[0], "First thought", NOW);
-    saveNote(db, base.user.id, lessonIds[0], "Second thought", minutesAfterNow(5));
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "Second thought",
+      minutesAfterNow(5)
+    );
 
     expect(getNote(db, base.user.id, lessonIds[0])).toMatchObject({
       body: "Second thought",
@@ -62,22 +67,20 @@ describe("saving a Note", () => {
     saveNote(db, base.user.id, lessonIds[0], "Second thought", NOW);
 
     expect(listNotes(db, base.user.id)).toHaveLength(1);
-    expect(() =>
-      db
-        .insert(schema.notes)
-        .values({ userId: base.user.id, lessonId: lessonIds[0], body: plainText("Dupe") })
-        .run()
-    ).toThrow();
   });
 
   it("accepts a Note of exactly 2000 characters", () => {
-    expect(saveNote(db, base.user.id, lessonIds[0], "a".repeat(2000), NOW)).toMatchObject({
+    expect(
+      saveNote(db, base.user.id, lessonIds[0], "a".repeat(2000), NOW)
+    ).toMatchObject({
       ok: true,
     });
   });
 
   it("refuses a Note over 2000 characters", () => {
-    expect(saveNote(db, base.user.id, lessonIds[0], "a".repeat(2001), NOW)).toEqual({
+    expect(
+      saveNote(db, base.user.id, lessonIds[0], "a".repeat(2001), NOW)
+    ).toEqual({
       ok: false,
       error: "Note must be 2000 characters or fewer",
     });
@@ -92,7 +95,13 @@ describe("saving a Note", () => {
   });
 
   it("keeps the body exactly as typed, Markdown characters included", () => {
-    saveNote(db, base.user.id, lessonIds[0], "# not a heading\n*not bold*", NOW);
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "# not a heading\n*not bold*",
+      NOW
+    );
 
     expect(getNote(db, base.user.id, lessonIds[0])?.body).toBe(
       "# not a heading\n*not bold*"
@@ -102,14 +111,20 @@ describe("saving a Note", () => {
 
 describe("listing Notes", () => {
   it("lists only the Student's own Notes, most recently edited first, with their Lesson and Course", () => {
-    const other = db
-      .insert(schema.users)
-      .values({ name: "Other", email: "other@example.com", role: UserRole.Student })
-      .returning()
-      .get();
+    const other = fixturePerson(db, {
+      name: "Other",
+      email: "other@example.com",
+      role: UserRole.Student,
+    });
     saveNote(db, base.user.id, lessonIds[0], "On lesson 1", NOW);
     saveNote(db, base.user.id, lessonIds[1], "On lesson 2", minutesAfterNow(5));
-    saveNote(db, base.user.id, lessonIds[0], "On lesson 1, edited", minutesAfterNow(10));
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "On lesson 1, edited",
+      minutesAfterNow(10)
+    );
     saveNote(db, other.id, lessonIds[0], "Someone else's", minutesAfterNow(15));
 
     expect(listNotes(db, base.user.id)).toMatchObject([

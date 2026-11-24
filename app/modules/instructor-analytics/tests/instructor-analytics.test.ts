@@ -1,10 +1,23 @@
+import {
+  fixturePerson,
+  fixtureCourse,
+  fixturePurchase,
+  fixtureModule,
+  fixtureLesson,
+  fixtureCourseRating,
+  fixtureTeam,
+  fixtureSeat,
+  fixtureLessonProgress,
+  fixtureQuiz,
+  fixtureQuizAttempt,
+} from "~/test/fixtures";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import * as schema from "~/db/schema";
-import {
-  getInstructorAnalytics,
-  type AnalyticsInput,
-} from "../index.server";
+import { enrollStudentInTransaction } from "~/lib/enrollments.server";
+import { createComment, deleteComment } from "~/lib/comments.server";
+import { fakeNotifications } from "~/lib/notifications.fake.server";
+import { getInstructorAnalytics, type AnalyticsInput } from "../index.server";
 
 const NOW = new Date("2026-06-15T12:00:00.000Z");
 const RECENT = "2026-06-14T12:00:00.000Z";
@@ -82,99 +95,104 @@ describe("Instructor analytics", () => {
 let sequence = 0;
 function person(role = schema.UserRole.Student) {
   const id = ++sequence;
-  return db
-    .insert(schema.users)
-    .values({ name: `Person ${id}`, email: `person${id}@example.com`, role })
-    .returning()
-    .get();
+  return fixturePerson(db, {
+    name: `Person ${id}`,
+    email: `person${id}@example.com`,
+    role,
+  });
 }
 function course(overrides: Partial<typeof schema.courses.$inferInsert> = {}) {
   const id = ++sequence;
-  return db
-    .insert(schema.courses)
-    .values({
-      title: `Course ${id}`,
-      slug: `course-${id}`,
-      description: "Course",
-      salesCopy: base.course.salesCopy,
-      categoryId: base.category.id,
-      instructorId: base.instructor.id,
-      status: schema.CourseStatus.Published,
-      ...overrides,
-    })
-    .returning()
-    .get();
+  return fixtureCourse(db, {
+    title: `Course ${id}`,
+    slug: `course-${id}`,
+    description: "Course",
+    salesCopy: base.course.salesCopy,
+    categoryId: base.category.id,
+    instructorId: base.instructor.id,
+    status: schema.CourseStatus.Published,
+    ...overrides,
+  });
 }
 function purchase(
   overrides: Partial<typeof schema.purchases.$inferInsert> = {}
 ) {
-  return db
-    .insert(schema.purchases)
-    .values({
-      userId: base.user.id,
-      courseId: base.course.id,
-      amountPaid: 10000,
-      createdAt: RECENT,
-      ...overrides,
-    })
-    .returning()
-    .get();
+  return fixturePurchase(db, {
+    userId: base.user.id,
+    courseId: base.course.id,
+    amountPaid: 10000,
+    createdAt: RECENT,
+    ...overrides,
+  });
 }
 function enroll(
   userId = base.user.id,
   courseId = base.course.id,
   enrolledAt = RECENT
 ) {
-  return db
-    .insert(schema.enrollments)
-    .values({ userId, courseId, enrolledAt })
-    .returning()
-    .get();
+  const result = enrollStudentInTransaction(
+    db,
+    userId,
+    courseId,
+    new Date(enrolledAt)
+  );
+  if (!result.ok) throw new Error(result.error);
+  return result.enrollment;
 }
 function lesson(courseId = base.course.id) {
-  const module = db
-    .insert(schema.modules)
-    .values({ courseId, title: "Module", position: 0 })
-    .returning()
-    .get();
-  return db
-    .insert(schema.lessons)
-    .values({ moduleId: module.id, title: "Lesson", position: 0 })
-    .returning()
-    .get();
+  const module = fixtureModule(db, { courseId, title: "Module", position: 0 });
+  return fixtureLesson(db, {
+    moduleId: module.id,
+    title: "Lesson",
+    position: 0,
+  });
 }
-function question(
+async function question(
   lessonId: number,
-  overrides: Partial<typeof schema.comments.$inferInsert> = {}
+  overrides: Pick<
+    Partial<typeof schema.comments.$inferInsert>,
+    "userId" | "parentId" | "body" | "createdAt" | "deletedAt"
+  > = {}
 ) {
-  return db
-    .insert(schema.comments)
-    .values({
-      lessonId,
-      userId: base.user.id,
-      body: base.course.salesCopy,
-      createdAt: RECENT,
-      ...overrides,
-    })
-    .returning()
-    .get();
+  const notifications = fakeNotifications();
+  const result = await createComment(
+    db,
+    overrides.userId ?? base.user.id,
+    lessonId,
+    overrides.parentId ?? null,
+    overrides.body ?? base.course.salesCopy,
+    new Date(overrides.createdAt ?? RECENT),
+    notifications
+  );
+  if (!result.ok) throw new Error(result.error);
+  if (overrides.deletedAt) {
+    const deleted = await deleteComment(
+      db,
+      result.comment.id,
+      result.comment.userId,
+      false,
+      new Date(overrides.deletedAt),
+      notifications
+    );
+    if (!deleted.ok) throw new Error(deleted.error);
+    return deleted.comment;
+  }
+  return result.comment;
 }
 
 describe("viewer scope and URL filters", () => {
-  it("pins Instructors to their own figures even when both URL ids target somebody else", () => {
+  it("pins Instructors to their own figures even when both URL ids target somebody else", async () => {
     const other = person(schema.UserRole.Instructor);
     const otherCourse = course({ instructorId: other.id });
     purchase({ courseId: otherCourse.id, amountPaid: 90000 });
     enroll(base.user.id, otherCourse.id);
-    question(lesson(otherCourse.id).id);
-    db.insert(schema.courseRatings)
-      .values({
-        userId: base.user.id,
-        courseId: otherCourse.id,
-        rating: 5,
-        createdAt: RECENT,
-      })
-      .run();
+    await question(lesson(otherCourse.id).id);
+    fixtureCourseRating(db, {
+      userId: base.user.id,
+      courseId: otherCourse.id,
+      rating: 5,
+      createdAt: RECENT,
+    });
     purchase({ amountPaid: 3333 });
     const result = analytics(
       `instructor=${other.id}&course=${otherCourse.id}&tab=course`
@@ -375,19 +393,17 @@ function seats(
   p: typeof schema.purchases.$inferSelect,
   claimedBy: (number | null)[]
 ) {
-  const team = db.insert(schema.teams).values({}).returning().get();
-  db.insert(schema.coupons)
-    .values(
-      claimedBy.map((userId) => ({
-        teamId: team.id,
-        courseId: p.courseId,
-        purchaseId: p.id,
-        code: `seat-${++sequence}`,
-        redeemedByUserId: userId,
-        redeemedAt: userId === null ? null : RECENT,
-      }))
-    )
-    .run();
+  const team = fixtureTeam(db);
+  claimedBy
+    .map((userId) => ({
+      teamId: team.id,
+      courseId: p.courseId,
+      purchaseId: p.id,
+      code: `seat-${++sequence}`,
+      redeemedByUserId: userId,
+      redeemedAt: userId === null ? null : RECENT,
+    }))
+    .forEach((values) => fixtureSeat(db, values));
 }
 
 describe("Students, Team Licences, and buyer rankings", () => {
@@ -501,43 +517,43 @@ describe("Students, Team Licences, and buyer rankings", () => {
 });
 
 describe("unanswered Discussion Questions", () => {
-  it("splits unanswered Discussion Questions into in-range and older without losing old work", () => {
+  it("splits unanswered Discussion Questions into in-range and older without losing old work", async () => {
     const l = lesson();
-    question(l.id, { createdAt: "2026-06-08T12:00:00.000Z" });
-    question(l.id, { createdAt: "2026-06-08T11:59:59.999Z" });
+    await question(l.id, { createdAt: "2026-06-08T12:00:00.000Z" });
+    await question(l.id, { createdAt: "2026-06-08T11:59:59.999Z" });
     expect(analytics("range=7d").questions).toEqual({ inRange: 1, older: 1 });
     expect(analytics("range=all").questions).toEqual({ inRange: 2, older: 0 });
   });
 
-  it("excludes staff-authored, deleted, and staff-answered Discussion Questions", () => {
+  it("excludes staff-authored, deleted, and staff-answered Discussion Questions", async () => {
     const l = lesson();
     const admin = person(schema.UserRole.Admin);
-    question(l.id, { userId: admin.id });
-    question(l.id, { userId: base.instructor.id });
-    question(l.id, { deletedAt: RECENT });
-    const instructorAnswered = question(l.id);
-    question(l.id, {
+    await question(l.id, { userId: admin.id });
+    await question(l.id, { userId: base.instructor.id });
+    await question(l.id, { deletedAt: RECENT });
+    const instructorAnswered = await question(l.id);
+    await question(l.id, {
       parentId: instructorAnswered.id,
       userId: base.instructor.id,
     });
-    const adminAnswered = question(l.id);
-    question(l.id, { parentId: adminAnswered.id, userId: admin.id });
+    const adminAnswered = await question(l.id);
+    await question(l.id, { parentId: adminAnswered.id, userId: admin.id });
     expect(analytics().questions).toEqual({ inRange: 0, older: 0 });
   });
 
-  it("keeps Discussion Questions with deleted staff replies or replies from Students and other Instructors", () => {
+  it("keeps Discussion Questions with deleted staff replies or replies from Students and other Instructors", async () => {
     const l = lesson();
     const otherInstructor = person(schema.UserRole.Instructor);
-    const q1 = question(l.id);
-    question(l.id, {
+    const q1 = await question(l.id);
+    await question(l.id, {
       parentId: q1.id,
       userId: base.instructor.id,
       deletedAt: RECENT,
     });
-    const q2 = question(l.id);
-    question(l.id, { parentId: q2.id, userId: base.user.id });
-    const q3 = question(l.id);
-    question(l.id, { parentId: q3.id, userId: otherInstructor.id });
+    const q2 = await question(l.id);
+    await question(l.id, { parentId: q2.id, userId: base.user.id });
+    const q3 = await question(l.id);
+    await question(l.id, { parentId: q3.id, userId: otherInstructor.id });
     expect(analytics().questions).toEqual({ inRange: 3, older: 0 });
   });
 });
@@ -547,29 +563,23 @@ function progress(
   lessonId: number,
   status = schema.LessonProgressStatus.Completed
 ) {
-  db.insert(schema.lessonProgress).values({ userId, lessonId, status }).run();
+  fixtureLessonProgress(db, [{ userId, lessonId, status }]);
 }
 function quiz(lessonId: number, title = "Quiz") {
-  return db
-    .insert(schema.quizzes)
-    .values({ lessonId, title, passingScore: 0.8 })
-    .returning()
-    .get();
+  return fixtureQuiz(db, { lessonId, title, passingScore: 0.8 });
 }
 function attempt(
   quizId: number,
   overrides: Partial<typeof schema.quizAttempts.$inferInsert> = {}
 ) {
-  db.insert(schema.quizAttempts)
-    .values({
-      quizId,
-      userId: base.user.id,
-      score: 1,
-      passed: true,
-      attemptedAt: RECENT,
-      ...overrides,
-    })
-    .run();
+  fixtureQuizAttempt(db, {
+    quizId,
+    userId: base.user.id,
+    score: 1,
+    passed: true,
+    attemptedAt: RECENT,
+    ...overrides,
+  });
 }
 
 describe("course progress and drop-off", () => {
@@ -604,11 +614,11 @@ describe("course progress and drop-off", () => {
 
   it("keeps Students who never started in the average and ignores duplicate completion rows and foreign lessons", () => {
     const l = lesson();
-    const secondLesson = db
-      .insert(schema.lessons)
-      .values({ moduleId: l.moduleId, title: "Second", position: 1 })
-      .returning()
-      .get();
+    const secondLesson = fixtureLesson(db, {
+      moduleId: l.moduleId,
+      title: "Second",
+      position: 1,
+    });
     const finisher = person();
     const untouched = person();
     const outsider = person();
@@ -641,31 +651,31 @@ describe("course progress and drop-off", () => {
 
   it("orders the curriculum and counts furthest reach across skipped lessons, excluding unenrolled progress", () => {
     // Insert later modules/lessons first so ordering must come from positions.
-    const m2 = db
-      .insert(schema.modules)
-      .values({ courseId: base.course.id, title: "Second", position: 2 })
-      .returning()
-      .get();
-    const m1 = db
-      .insert(schema.modules)
-      .values({ courseId: base.course.id, title: "First", position: 1 })
-      .returning()
-      .get();
-    const l3 = db
-      .insert(schema.lessons)
-      .values({ moduleId: m2.id, title: "Three", position: 1 })
-      .returning()
-      .get();
-    const l2 = db
-      .insert(schema.lessons)
-      .values({ moduleId: m1.id, title: "Two", position: 2 })
-      .returning()
-      .get();
-    const l1 = db
-      .insert(schema.lessons)
-      .values({ moduleId: m1.id, title: "One", position: 1 })
-      .returning()
-      .get();
+    const m2 = fixtureModule(db, {
+      courseId: base.course.id,
+      title: "Second",
+      position: 2,
+    });
+    const m1 = fixtureModule(db, {
+      courseId: base.course.id,
+      title: "First",
+      position: 1,
+    });
+    const l3 = fixtureLesson(db, {
+      moduleId: m2.id,
+      title: "Three",
+      position: 1,
+    });
+    const l2 = fixtureLesson(db, {
+      moduleId: m1.id,
+      title: "Two",
+      position: 2,
+    });
+    const l1 = fixtureLesson(db, {
+      moduleId: m1.id,
+      title: "One",
+      position: 1,
+    });
     const early = person();
     const neverStarted = person();
     enroll();
@@ -800,9 +810,12 @@ describe("quiz attempts and ratings", () => {
       [1, "2026-06-08T11:59:59.999Z", base.course.id],
       [1, RECENT, otherCourse.id],
     ] as const) {
-      db.insert(schema.courseRatings)
-        .values({ userId: person().id, courseId, rating, createdAt })
-        .run();
+      fixtureCourseRating(db, {
+        userId: person().id,
+        courseId,
+        rating,
+        createdAt,
+      });
     }
     expect(analytics("range=7d").ratings).toEqual({ average: 4.3, count: 3 });
     expect(analytics("range=all").ratings).toEqual({ average: 3.5, count: 4 });

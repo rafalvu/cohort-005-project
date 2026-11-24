@@ -45,6 +45,8 @@ export default [
     route("admin/categories", "routes/admin.categories.tsx"),
     route("admin/refunds", "routes/admin.refunds.tsx"),
     route("saved", "routes/saved.tsx"),
+
+    route("bookmarks", "routes/bookmarks.tsx"),
     route("settings", "routes/settings.tsx"),
     route("team", "routes/team.tsx"),
     route("redeem/:code", "routes/redeem.$code.tsx"),

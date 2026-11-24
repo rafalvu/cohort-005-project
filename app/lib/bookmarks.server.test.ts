@@ -1,8 +1,12 @@
+import { fixtureModule, fixtureLesson, fixturePerson } from "~/test/fixtures";
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
-import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
-import { isBookmarked, listBookmarks, toggleBookmark } from "./bookmarks.server";
+import {
+  isBookmarked,
+  listBookmarks,
+  toggleBookmark,
+} from "./bookmarks.server";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
 
@@ -18,19 +22,19 @@ beforeEach(() => {
   db = createTestDb();
   base = seedBaseData(db);
 
-  const module = db
-    .insert(schema.modules)
-    .values({ courseId: base.course.id, title: "Basics", position: 1 })
-    .returning()
-    .get();
+  const module = fixtureModule(db, {
+    courseId: base.course.id,
+    title: "Basics",
+    position: 1,
+  });
 
   lessonIds = [1, 2].map(
     (position) =>
-      db
-        .insert(schema.lessons)
-        .values({ moduleId: module.id, title: `Lesson ${position}`, position })
-        .returning()
-        .get().id
+      fixtureLesson(db, {
+        moduleId: module.id,
+        title: `Lesson ${position}`,
+        position,
+      }).id
   );
 });
 
@@ -53,22 +57,16 @@ describe("toggling a Bookmark", () => {
     toggleBookmark(db, base.user.id, lessonIds[0], NOW);
 
     expect(listBookmarks(db, base.user.id)).toHaveLength(1);
-    expect(() =>
-      db
-        .insert(schema.bookmarks)
-        .values({ userId: base.user.id, lessonId: lessonIds[0] })
-        .run()
-    ).toThrow();
   });
 });
 
 describe("listing Bookmarks", () => {
   it("lists only the Student's own Bookmarks, newest first, with their Lesson and Course", () => {
-    const other = db
-      .insert(schema.users)
-      .values({ name: "Other", email: "other@example.com", role: UserRole.Student })
-      .returning()
-      .get();
+    const other = fixturePerson(db, {
+      name: "Other",
+      email: "other@example.com",
+      role: UserRole.Student,
+    });
     toggleBookmark(db, base.user.id, lessonIds[0], NOW);
     toggleBookmark(db, base.user.id, lessonIds[1], minutesAfterNow(5));
     toggleBookmark(db, other.id, lessonIds[0], minutesAfterNow(10));

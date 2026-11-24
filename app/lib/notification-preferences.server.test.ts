@@ -1,6 +1,12 @@
+import {
+  fixtureCourseInstructor,
+  fixturePurchase,
+  fixtureTeam,
+  fixtureSeat,
+  fixturePerson,
+} from "~/test/fixtures";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
-import { eq } from "drizzle-orm";
 import * as schema from "~/db/schema";
 import {
   getFeedPreferences,
@@ -186,32 +192,26 @@ describe("changing a feed preference", () => {
 
 describe("which switches a person sees", () => {
   function buyIndividually(userId: number) {
-    return db
-      .insert(schema.purchases)
-      .values({ userId, courseId: base.course.id, amountPaid: 4900 })
-      .returning()
-      .get();
+    return fixturePurchase(db, {
+      userId,
+      courseId: base.course.id,
+      amountPaid: 4900,
+    });
   }
 
   function buyTeamLicence(userId: number) {
     const purchase = buyIndividually(userId);
-    const team = db.insert(schema.teams).values({}).returning().get();
-    db.insert(schema.coupons)
-      .values({
-        teamId: team.id,
-        courseId: base.course.id,
-        code: `SEAT-${purchase.id}`,
-        purchaseId: purchase.id,
-      })
-      .run();
+    const team = fixtureTeam(db);
+    fixtureSeat(db, {
+      teamId: team.id,
+      courseId: base.course.id,
+      code: `SEAT-${purchase.id}`,
+      purchaseId: purchase.id,
+    });
   }
 
   function addUser(name: string, role: schema.UserRole) {
-    return db
-      .insert(schema.users)
-      .values({ name, email: `${name}@example.com`, role })
-      .returning()
-      .get();
+    return fixturePerson(db, { name, email: `${name}@example.com`, role });
   }
 
   it("shows a Student with nothing only Discussion Replies", () => {
@@ -257,10 +257,7 @@ describe("which switches a person sees", () => {
 
   it("treats a Platform Admin who owns a course as an Instructor too", () => {
     const admin = addUser("Alex", schema.UserRole.Admin);
-    db.update(schema.courses)
-      .set({ instructorId: admin.id })
-      .where(eq(schema.courses.id, base.course.id))
-      .run();
+    fixtureCourseInstructor(db, base.course.id, admin.id);
 
     expect(visibleNotificationCategories(db, admin.id)).toEqual([
       "enrollments",
