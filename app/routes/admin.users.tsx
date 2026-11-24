@@ -1,18 +1,12 @@
+import { eq } from "drizzle-orm";
+import { AlertTriangle, Pencil, Users } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useFetcher } from "react-router";
+import { data, isRouteErrorResponse, Link } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/admin.users";
-import { people } from "~/modules/permissions/person.server";
-import { parseFormData } from "~/lib/validation";
-import { UserRole, users } from "~/db/schema";
-import { db } from "~/db";
-import { eq } from "drizzle-orm";
-import { defaultNotifications } from "~/lib/notifications.server";
-import { syncUser } from "~/lib/notification-preferences.server";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
+import { Card, CardContent } from "~/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -20,19 +14,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { AlertTriangle, Pencil, Shield, Users } from "lucide-react";
-import { data, isRouteErrorResponse, Link } from "react-router";
+import { Skeleton } from "~/components/ui/skeleton";
+import { db } from "~/db";
+import { UserRole, users } from "~/db/schema";
+import { syncUser } from "~/lib/notification-preferences.server";
+import { defaultNotifications } from "~/lib/notifications.server";
+import { formId, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/admin.users";
 
 const adminUserActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("update-user"),
-    userId: z.coerce.number().int(),
+    userId: formId,
     name: z.string().trim().min(1, "Name cannot be empty."),
     email: z.string().trim().min(1, "Email cannot be empty."),
   }),
   z.object({
     intent: z.literal("update-role"),
-    userId: z.coerce.number().int(),
+    userId: formId,
     role: z.nativeEnum(UserRole),
   }),
 ]);
@@ -369,7 +369,7 @@ export function HydrateFallback() {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: 8 }).map((_, i) => (
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
                   <TableRowSkeleton key={i} />
                 ))}
               </tbody>

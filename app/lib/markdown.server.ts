@@ -1,6 +1,6 @@
 import { marked, Renderer } from "marked";
 import { type Highlighter, createHighlighter } from "shiki";
-import type { Markdown } from "~/lib/text";
+import type { Markdown, RenderedHtml } from "~/lib/text";
 
 let highlighter: Highlighter | null = null;
 
@@ -8,13 +8,29 @@ async function getHighlighter(): Promise<Highlighter> {
   if (!highlighter) {
     highlighter = await createHighlighter({
       themes: ["github-dark"],
-      langs: ["typescript", "javascript", "json", "bash", "html", "css", "tsx", "jsx", "sql", "yaml", "markdown", "text", "plaintext"],
+      langs: [
+        "typescript",
+        "javascript",
+        "json",
+        "bash",
+        "html",
+        "css",
+        "tsx",
+        "jsx",
+        "sql",
+        "yaml",
+        "markdown",
+        "text",
+        "plaintext",
+      ],
     });
   }
   return highlighter;
 }
 
-export async function renderMarkdown(markdown: Markdown): Promise<string> {
+export async function renderMarkdown(
+  markdown: Markdown
+): Promise<RenderedHtml> {
   const hl = await getHighlighter();
 
   const renderer = new Renderer();
@@ -35,5 +51,5 @@ export async function renderMarkdown(markdown: Markdown): Promise<string> {
     }
   };
 
-  return marked.parse(markdown, { renderer }) as string;
+  return marked.parse(markdown, { renderer }) as RenderedHtml;
 }

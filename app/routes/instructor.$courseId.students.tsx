@@ -1,175 +1,14 @@
-import { Link } from "react-router";
-import type { Route } from "./+types/instructor.$courseId.students";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { isLapsed } from "~/lib/enrollments";
-import { Card, CardContent } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
 import { AlertTriangle, ArrowLeft, Users, Award } from "lucide-react";
-import { data, isRouteErrorResponse } from "react-router";
+import { Link } from "react-router";
+import { isRouteErrorResponse } from "react-router";
+import { PageLinks } from "~/components/page-links";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
 import { db } from "~/db";
-import {
-  modules,
-  lessons,
-  users,
-  enrollments,
-  quizzes,
-  quizAttempts,
-  lessonProgress,
-  purchases,
-  LessonProgressStatus,
-} from "~/db/schema";
-import { eq, and, or, sql, desc, inArray, max } from "drizzle-orm";
-
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-function getCourseEnrolledStudents(courseId: number) {
-  return db
-    .select({
-      enrollmentId: enrollments.id,
-      userId: enrollments.userId,
-      enrolledAt: enrollments.enrolledAt,
-      completedAt: enrollments.completedAt,
-    })
-    .from(enrollments)
-    .where(eq(enrollments.courseId, courseId))
-    .all();
-}
-
-// Students who lost their Enrollment keep their progress, so they still show
-// on the roster. They have no Enrollment, so their purchase date stands in.
-function getCourseLapsedStudents(courseId: number, enrolledUserIds: number[]) {
-  const lessonIds = getCourseLessonIds(courseId);
-  if (lessonIds.length === 0) return [];
-
-  const withProgress = db
-    .selectDistinct({ userId: lessonProgress.userId })
-    .from(lessonProgress)
-    .where(inArray(lessonProgress.lessonId, lessonIds))
-    .all()
-    .map((row) => row.userId)
-    .filter((userId) => !enrolledUserIds.includes(userId));
-
-  if (withProgress.length === 0) return [];
-
-  return db
-    .select({
-      userId: purchases.userId,
-      enrolledAt: max(purchases.createdAt),
-    })
-    .from(purchases)
-    .where(
-      and(
-        eq(purchases.courseId, courseId),
-        inArray(purchases.userId, withProgress)
-      )
-    )
-    .groupBy(purchases.userId)
-    .all()
-    .map((row) => ({
-      enrollmentId: null,
-      userId: row.userId,
-      enrolledAt: row.enrolledAt ?? "",
-      completedAt: null,
-    }));
-}
-
-function getQuizByLessonId(lessonId: number) {
-  return db.select().from(quizzes).where(eq(quizzes.lessonId, lessonId)).get();
-}
-
-function getBestAttempt(userId: number, quizId: number) {
-  return db
-    .select()
-    .from(quizAttempts)
-    .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.quizId, quizId))
-    )
-    .orderBy(desc(quizAttempts.score))
-    .limit(1)
-    .get();
-}
-
-function getCourseLessonIds(courseId: number): number[] {
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  if (courseModules.length === 0) return [];
-
-  const courseLessons = db
-    .select({ id: lessons.id })
-    .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
-    .all();
-
-  return courseLessons.map((l) => l.id);
-}
-
-function calculateProgress(
-  userId: number,
-  courseId: number,
-  weightByDuration: boolean
-) {
-  const lessonIds = getCourseLessonIds(courseId);
-
-  if (lessonIds.length === 0) return 0;
-
-  if (weightByDuration) {
-    const courseLessons = db
-      .select({
-        id: lessons.id,
-        durationMinutes: lessons.durationMinutes,
-      })
-      .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
-      .all();
-
-    const totalDuration = courseLessons.reduce(
-      (sum, l) => sum + (l.durationMinutes ?? 1),
-      0
-    );
-
-    if (totalDuration === 0) return 0;
-
-    const completed = db
-      .select()
-      .from(lessonProgress)
-      .where(
-        and(
-          eq(lessonProgress.userId, userId),
-          eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
-        )
-      )
-      .all();
-
-    const completedIds = new Set(completed.map((p) => p.lessonId));
-
-    const completedDuration = courseLessons
-      .filter((l) => completedIds.has(l.id))
-      .reduce((sum, l) => sum + (l.durationMinutes ?? 1), 0);
-
-    return Math.round((completedDuration / totalDuration) * 100);
-  }
-
-  const completedCount = db
-    .select({ count: sql<number>`count(*)` })
-    .from(lessonProgress)
-    .where(
-      and(
-        eq(lessonProgress.userId, userId),
-        eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
-      )
-    )
-    .get();
-
-  return Math.round(((completedCount?.count ?? 0) / lessonIds.length) * 100);
-}
+import { readPage } from "~/lib/pagination";
+import { studentRoster } from "~/lib/student-roster.server";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/instructor.$courseId.students";
 
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Student Roster";
@@ -185,89 +24,10 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     "manage",
     { courseId: params.courseId }
   );
-  const courseId = course.id;
-
-  // Get all enrolled students
-  const enrolledStudents: {
-    enrollmentId: number | null;
-    userId: number;
-    enrolledAt: string;
-    completedAt: string | null;
-  }[] = getCourseEnrolledStudents(courseId);
-  enrolledStudents.push(
-    ...getCourseLapsedStudents(
-      courseId,
-      enrolledStudents.map((s) => s.userId)
-    )
-  );
-
-  // Get all lessons with quizzes for this course
-  const courseModules = db
-    .select({ id: modules.id })
-    .from(modules)
-    .where(eq(modules.courseId, courseId))
-    .all();
-
-  // Get all lessons across all modules
-  const allCourseLessons: { id: number; title: string }[] = [];
-  for (const mod of courseModules) {
-    const modLessons = db
-      .select({ id: lessons.id, title: lessons.title })
-      .from(lessons)
-      .where(eq(lessons.moduleId, mod.id))
-      .all();
-    allCourseLessons.push(...modLessons);
-  }
-
-  // Find which lessons have quizzes
-  const lessonQuizzes: {
-    lessonId: number;
-    lessonTitle: string;
-    quizId: number;
-    quizTitle: string;
-  }[] = [];
-  for (const lesson of allCourseLessons) {
-    const quiz = getQuizByLessonId(lesson.id);
-    if (quiz) {
-      lessonQuizzes.push({
-        lessonId: lesson.id,
-        lessonTitle: lesson.title,
-        quizId: quiz.id,
-        quizTitle: quiz.title,
-      });
-    }
-  }
-
-  // Build student data with progress and quiz scores
-  const students = enrolledStudents.map((enrollment) => {
-    const studentUser = getUserById(enrollment.userId);
-    const progress = calculateProgress(enrollment.userId, courseId, false);
-
-    // Get best quiz attempt for each quiz in this course
-    const quizScores = lessonQuizzes.map((lq) => {
-      const bestAttempt = getBestAttempt(enrollment.userId, lq.quizId);
-      return {
-        quizId: lq.quizId,
-        quizTitle: lq.quizTitle,
-        lessonTitle: lq.lessonTitle,
-        bestScore: bestAttempt?.score ?? null,
-        passed: bestAttempt?.passed ?? null,
-      };
-    });
-
-    return {
-      userId: enrollment.userId,
-      name: studentUser?.name ?? "Unknown",
-      email: studentUser?.email ?? "",
-      enrolledAt: enrollment.enrolledAt,
-      completedAt: enrollment.completedAt,
-      lapsed: isLapsed(enrollment),
-      progress,
-      quizScores,
-    };
-  });
-
-  return { course, students, quizCount: lessonQuizzes.length };
+  return {
+    course,
+    ...studentRoster(db, course.id, readPage(new URL(request.url))),
+  };
 }
 
 function progressBar(progress: number) {
@@ -294,14 +54,14 @@ function quizScoreBadge(score: number | null, passed: boolean | null) {
   if (passed) {
     return (
       <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
-        {percentage}%
+        {percentage}% · Passed
       </span>
     );
   }
 
   return (
     <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/30 dark:text-red-400">
-      {percentage}%
+      {percentage}% · Failed
     </span>
   );
 }
@@ -344,8 +104,8 @@ export default function InstructorStudentRoster({
       <div className="mb-4 flex items-center gap-4 text-sm text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Users className="size-4" />
-          {students.length} {students.length === 1 ? "student" : "students"}{" "}
-          enrolled
+          {students.length} {students.length === 1 ? "student" : "students"} on
+          this page
         </span>
         {quizCount > 0 && (
           <span className="flex items-center gap-1.5">
@@ -355,6 +115,11 @@ export default function InstructorStudentRoster({
         )}
       </div>
 
+      <PageLinks
+        label="Student pages"
+        page={loaderData.page}
+        hasNext={loaderData.hasNext}
+      />
       {students.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">

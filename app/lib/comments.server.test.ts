@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import * as schema from "~/db/schema";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { createComment, deleteComment, editComment } from "./comments.server";
+import type { NotificationKind } from "./notification-feed";
 import {
   fakeNotifications,
   type FakeNotifications,
   type SentNotification,
 } from "./notifications.fake.server";
-import type { NotificationKind } from "./notification-feed";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
 
@@ -271,7 +271,7 @@ describe("the Discussion Reply Notification", () => {
     });
     expect(logged).toHaveBeenCalledWith(
       expect.stringContaining("discussion-reply:"),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     logged.mockRestore();
   });
@@ -362,7 +362,7 @@ describe("the Discussion Question Notification", () => {
     expect(result).toMatchObject({ ok: true, comment: { parentId: null } });
     expect(logged).toHaveBeenCalledWith(
       expect.stringContaining("discussion-question:"),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     logged.mockRestore();
   });
@@ -540,7 +540,7 @@ describe("deleting a comment's Notifications", () => {
     });
     expect(logged).toHaveBeenCalledWith(
       expect.stringContaining(`comment:${question.id}`),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     logged.mockRestore();
   });

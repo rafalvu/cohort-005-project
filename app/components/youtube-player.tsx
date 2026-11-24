@@ -75,7 +75,9 @@ export function YouTubePlayer({
 }: YouTubePlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YT.Player | null>(null);
-  const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
   const [progress, setProgress] = useState(initialProgress);
   const [videoDuration, setVideoDuration] = useState(
     durationMinutes ? durationMinutes * 60 : 0
@@ -154,7 +156,11 @@ export function YouTubePlayer({
               if (d > 0) setVideoDuration(d);
             }
             if (autoplay && player && typeof player.playVideo === "function") {
-              try { player.playVideo(); } catch { /* silently fail */ }
+              try {
+                player.playVideo();
+              } catch {
+                /* silently fail */
+              }
             }
           },
           onStateChange: (event: YT.OnStateChangeEvent) => {
@@ -192,12 +198,22 @@ export function YouTubePlayer({
       }
       playerRef.current = null;
     };
-  }, [videoId, startPosition, autoplay, sendTrackingEvent, startTracking, stopTracking, updateProgress]);
+  }, [
+    videoId,
+    startPosition,
+    autoplay,
+    sendTrackingEvent,
+    startTracking,
+    stopTracking,
+    updateProgress,
+  ]);
 
   if (!videoId) {
     return (
       <div className="mb-8 flex aspect-video items-center justify-center rounded-lg bg-muted">
-        <p className="text-muted-foreground">Invalid or unsupported video URL</p>
+        <p className="text-muted-foreground">
+          Invalid or unsupported video URL
+        </p>
       </div>
     );
   }
@@ -223,16 +239,15 @@ export function YouTubePlayer({
       )}
       {onToggleAutoplay && (
         <div className="mt-2 flex items-center justify-end">
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
             Autoplay
             <button
               type="button"
               role="switch"
+              aria-label="Autoplay"
               aria-checked={autoplay}
               className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
-                autoplay
-                  ? "border-primary bg-primary"
-                  : "border-input bg-muted"
+                autoplay ? "border-primary bg-primary" : "border-input bg-muted"
               }`}
               onClick={onToggleAutoplay}
             >
@@ -242,7 +257,7 @@ export function YouTubePlayer({
                 }`}
               />
             </button>
-          </label>
+          </div>
         </div>
       )}
     </div>

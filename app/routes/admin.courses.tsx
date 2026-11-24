@@ -1,22 +1,12 @@
+import { inArray, eq, sql } from "drizzle-orm";
+import { AlertTriangle, BookOpen, Users } from "lucide-react";
 import { useEffect } from "react";
 import { useFetcher } from "react-router";
+import { data, isRouteErrorResponse, Link } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/admin.courses";
-import { people } from "~/modules/permissions/person.server";
-import { parseFormData } from "~/lib/validation";
-import {
-  CourseStatus,
-  courses,
-  modules,
-  lessons,
-  enrollments,
-} from "~/db/schema";
-import { db } from "~/db";
-import { eq, or, sql } from "drizzle-orm";
-import { Card, CardContent } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
+import { Card, CardContent } from "~/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -24,13 +14,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { AlertTriangle, BookOpen, Users } from "lucide-react";
-import { data, isRouteErrorResponse, Link } from "react-router";
+import { Skeleton } from "~/components/ui/skeleton";
+import { db } from "~/db";
+import {
+  CourseStatus,
+  courses,
+  modules,
+  lessons,
+  enrollments,
+} from "~/db/schema";
+import { formId, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/admin.courses";
 
 const adminCourseActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("update-status"),
-    courseId: z.coerce.number().int(),
+    courseId: formId,
     status: z.nativeEnum(CourseStatus),
   }),
 ]);
@@ -51,7 +51,12 @@ function getLessonCountForCourse(courseId: number) {
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .get();
 
   return count?.count ?? 0;
@@ -286,7 +291,7 @@ export function HydrateFallback() {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: 4 }).map((_, i) => (
+                {[1, 2, 3, 4].map((i) => (
                   <CourseRowSkeleton key={i} />
                 ))}
               </tbody>

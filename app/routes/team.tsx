@@ -1,13 +1,12 @@
+import { eq, and } from "drizzle-orm";
+import { BookOpen, Copy, Check, AlertTriangle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useFetcher } from "react-router";
-import { toast } from "sonner";
-import type { Route } from "./+types/team";
-import { people } from "~/modules/permissions/person.server";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Textarea } from "~/components/ui/textarea";
-import { Users, BookOpen, Copy, Check, AlertTriangle } from "lucide-react";
 import { data, isRouteErrorResponse } from "react-router";
+import { toast } from "sonner";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardHeader } from "~/components/ui/card";
+import { Textarea } from "~/components/ui/textarea";
 import { db } from "~/db";
 import {
   teams,
@@ -18,13 +17,14 @@ import {
   TeamMemberRole,
   RefundStatus,
 } from "~/db/schema";
-import { eq, and } from "drizzle-orm";
 import {
   getSeatAvailability,
   listTeamLicences,
   type SeatAvailability,
 } from "~/lib/refunds.server";
 import { formatPrice } from "~/lib/utils";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/team";
 
 function getTeamForAdmin(userId: number) {
   const membership = db
@@ -119,7 +119,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         claimed: 0,
       });
     }
-    const entry = courseMap.get(coupon.courseId)!;
+    const entry = courseMap.get(coupon.courseId);
+    if (!entry) throw new Error("Missing course statistics");
     entry.total++;
     if (coupon.redeemedByUserId !== null) {
       entry.claimed++;
@@ -396,12 +397,13 @@ function TeamLicenceRow({ licence }: { licence: TeamLicence }) {
           )}
         </div>
 
-        {refundRequest?.status === RefundStatus.Declined && refundRequest.decisionNote && (
-          <p className="mt-3 rounded-md bg-muted p-2 text-sm">
-            <span className="font-medium">Refund declined: </span>
-            {refundRequest.decisionNote}
-          </p>
-        )}
+        {refundRequest?.status === RefundStatus.Declined &&
+          refundRequest.decisionNote && (
+            <p className="mt-3 rounded-md bg-muted p-2 text-sm">
+              <span className="font-medium">Refund declined: </span>
+              {refundRequest.decisionNote}
+            </p>
+          )}
 
         {licence.canRequestRefund && isFormOpen && (
           <fetcher.Form
@@ -414,7 +416,10 @@ function TeamLicenceRow({ licence }: { licence: TeamLicence }) {
               has read your note. Until then, none of this licence&apos;s seats
               can be claimed. You can ask until{" "}
               {/* A calendar day, so read it as local midnight, not UTC. */}
-              {new Date(`${licence.lastDayInWindow}T00:00`).toLocaleDateString()}.
+              {new Date(
+                `${licence.lastDayInWindow}T00:00`
+              ).toLocaleDateString()}
+              .
             </p>
             <input type="hidden" name="purchaseId" value={licence.purchaseId} />
             <Textarea

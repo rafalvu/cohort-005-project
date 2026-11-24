@@ -1,21 +1,4 @@
-import { Link } from "react-router";
-import type { Route } from "./+types/courses.$slug.$moduleId";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { db } from "~/db";
-import {
-  categories,
-  courses,
-  lessonProgress,
-  lessons,
-  modules,
-  users,
-  LessonProgressStatus,
-} from "~/db/schema";
-import { and, eq, or } from "drizzle-orm";
-import { Card, CardContent, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
-import { UserAvatar } from "~/components/user-avatar";
+import { inArray, and, eq } from "drizzle-orm";
 import {
   AlertTriangle,
   BookOpen,
@@ -26,8 +9,25 @@ import {
   PlayCircle,
   Video,
 } from "lucide-react";
+import { Link } from "react-router";
 import { data, isRouteErrorResponse } from "react-router";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
+import { UserAvatar } from "~/components/user-avatar";
+import { db } from "~/db";
+import {
+  categories,
+  courses,
+  lessonProgress,
+  lessons,
+  modules,
+  users,
+  LessonProgressStatus,
+} from "~/db/schema";
 import { formatDuration } from "~/lib/utils";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import type { Route } from "./+types/courses.$slug.$moduleId";
 
 function getCourseWithDetails(id: number) {
   const course = db
@@ -72,7 +72,7 @@ function getCourseWithDetails(id: number) {
       ? db
           .select()
           .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
+          .where(inArray(lessons.moduleId, moduleIds))
           .orderBy(lessons.position)
           .all()
       : [];
@@ -112,7 +112,12 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   if (courseLessons.length === 0) return [];
@@ -123,7 +128,10 @@ function getLessonProgressForCourse(userId: number, courseId: number) {
     .where(
       and(
         eq(lessonProgress.userId, userId),
-        or(...courseLessons.map((l) => eq(lessonProgress.lessonId, l.id)))!
+        inArray(
+          lessonProgress.lessonId,
+          courseLessons.map((l) => l.id)
+        )
       )
     )
     .all();
@@ -222,7 +230,7 @@ export function HydrateFallback() {
         </CardContent>
       </Card>
       <div className="space-y-2">
-        {Array.from({ length: 5 }).map((_, i) => (
+        {[1, 2, 3, 4, 5].map((i) => (
           <Skeleton key={i} className="h-12 w-full" />
         ))}
       </div>

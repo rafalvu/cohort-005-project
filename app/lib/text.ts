@@ -10,3 +10,5 @@ export function markdown(text: string): Markdown {
 export function plainText(text: string): PlainText {
   return text as PlainText;
 }
+
+export type RenderedHtml = string & { readonly [textFormat]: "RenderedHtml" };

@@ -1,16 +1,16 @@
 import http from "node:http";
 import net from "node:net";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe,it,expect,afterEach } from "vitest";
 import { resolveChoice } from "./agents";
 import {
-  BURST_THRESHOLD,
-  BURST_WINDOW_MS,
-  burstKey,
-  rejectUpgrade,
-  trackBurst,
-  upstreamConnection,
-  upstreamPathPrefix,
-  type BurstState,
+BURST_THRESHOLD,
+BURST_WINDOW_MS,
+burstKey,
+rejectUpgrade,
+trackBurst,
+upstreamConnection,
+upstreamPathPrefix,
+type BurstState,
 } from "./proxy";
 
 const PORT = { port: 8787, platform: "linux" as NodeJS.Platform };
@@ -211,7 +211,8 @@ describe("rejectUpgrade", () => {
     });
     server.on("upgrade", rejectUpgrade);
 
-    await new Promise<void>((resolve) => server!.listen(0, resolve));
+    const listeningServer = server;
+    await new Promise<void>((resolve) => listeningServer.listen(0, resolve));
     const { port } = server.address() as net.AddressInfo;
 
     const response = await new Promise<string>((resolve, reject) => {
@@ -267,7 +268,7 @@ describe("trackBurst", () => {
       lastResult = trackBurst(state, KEY, now); // all in the same instant
       state = lastResult.state;
     }
-    expect(lastResult!.suppressed).toBe(false); // exactly at the threshold: not yet over it
+    expect(lastResult?.suppressed).toBe(false); // exactly at the threshold: not yet over it
 
     const over = trackBurst(state, KEY, now);
     expect(over.suppressed).toBe(true);

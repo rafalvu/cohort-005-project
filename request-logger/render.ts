@@ -36,6 +36,10 @@ interface RenderInput {
 
 const REDACT = new Set([
   "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-postmark-server-token",
   "x-api-key",
   "api-key",
   "x-goog-api-key",

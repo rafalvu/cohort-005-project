@@ -1,5 +1,23 @@
-import { Form, Link, useSearchParams, useNavigation, isRouteErrorResponse } from "react-router";
-import type { Route } from "./+types/courses";
+import { eq, like, and, or, sql, inArray } from "drizzle-orm";
+import { AlertTriangle, BookOpen, Search } from "lucide-react";
+import {
+  Form,
+  Link,
+  useSearchParams,
+  useNavigation,
+  isRouteErrorResponse,
+} from "react-router";
+import { CourseImage } from "~/components/course-image";
+import { StarRating } from "~/components/star-rating";
+import { Button } from "~/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
+import { UserAvatar } from "~/components/user-avatar";
 import { db } from "~/db";
 import {
   courses as coursesTable,
@@ -13,18 +31,11 @@ import {
   CourseStatus,
   LessonProgressStatus,
 } from "~/db/schema";
-import { eq, like, and, or, sql, inArray } from "drizzle-orm";
-import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
-import { AlertTriangle, BookOpen, Search } from "lucide-react";
-import { CourseImage } from "~/components/course-image";
-import { UserAvatar } from "~/components/user-avatar";
-import { getCurrentUserId } from "~/lib/session";
-import { formatPrice } from "~/lib/utils";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice } from "~/lib/ppp";
-import { StarRating } from "~/components/star-rating";
+import { getCurrentUserId } from "~/lib/session";
+import { formatPrice } from "~/lib/utils";
+import type { Route } from "./+types/courses";
 
 function buildCourseQuery(
   search: string | null,
@@ -43,7 +54,7 @@ function buildCourseQuery(
   if (search) {
     const term = `%${search}%`;
     conditions.push(
-      or(like(coursesTable.title, term), like(coursesTable.description, term))!
+      or(like(coursesTable.title, term), like(coursesTable.description, term))
     );
   }
 
@@ -68,7 +79,10 @@ function buildCourseQuery(
     })
     .from(coursesTable)
     .innerJoin(users, eq(coursesTable.instructorId, users.id))
-    .innerJoin(categoriesTable, eq(coursesTable.categoryId, categoriesTable.id));
+    .innerJoin(
+      categoriesTable,
+      eq(coursesTable.categoryId, categoriesTable.id)
+    );
 
   if (category) {
     conditions.push(eq(categoriesTable.slug, category));
@@ -99,18 +113,19 @@ function getLessonCountForCourse(courseId: number) {
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .get();
 
   return count?.count ?? 0;
 }
 
 function getAllCategories() {
-  return db
-    .select()
-    .from(categoriesTable)
-    .orderBy(categoriesTable.name)
-    .all();
+  return db.select().from(categoriesTable).orderBy(categoriesTable.name).all();
 }
 
 function getUserEnrolledCourses(userId: number) {
@@ -143,7 +158,12 @@ function getCourseLessonIds(courseId: number): number[] {
   const courseLessons = db
     .select({ id: lessons.id })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .all();
 
   return courseLessons.map((l) => l.id);
@@ -165,7 +185,7 @@ function calculateProgress(
         durationMinutes: lessons.durationMinutes,
       })
       .from(lessons)
-      .where(or(...lessonIds.map((id) => eq(lessons.id, id)))!)
+      .where(inArray(lessons.id, lessonIds))
       .all();
 
     const totalDuration = courseLessons.reduce(
@@ -182,7 +202,7 @@ function calculateProgress(
         and(
           eq(lessonProgress.userId, userId),
           eq(lessonProgress.status, LessonProgressStatus.Completed),
-          or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+          inArray(lessonProgress.lessonId, lessonIds)
         )
       )
       .all();
@@ -203,7 +223,7 @@ function calculateProgress(
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -222,7 +242,7 @@ function getCompletedLessonCount(userId: number, courseId: number) {
       and(
         eq(lessonProgress.userId, userId),
         eq(lessonProgress.status, LessonProgressStatus.Completed),
-        or(...lessonIds.map((id) => eq(lessonProgress.lessonId, id)))!
+        inArray(lessonProgress.lessonId, lessonIds)
       )
     )
     .get();
@@ -304,7 +324,10 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     for (const enrollment of enrollments) {
       progressMap.set(enrollment.courseId, {
         progress: calculateProgress(currentUserId, enrollment.courseId, false),
-        completedLessons: getCompletedLessonCount(currentUserId, enrollment.courseId),
+        completedLessons: getCompletedLessonCount(
+          currentUserId,
+          enrollment.courseId
+        ),
       });
     }
   }
@@ -330,7 +353,13 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   const categories = getAllCategories();
 
-  return { courses: coursesWithLessonCount, categories, search, category, currentUserId };
+  return {
+    courses: coursesWithLessonCount,
+    categories,
+    search,
+    category,
+    currentUserId,
+  };
 }
 
 function CourseCardSkeleton() {
@@ -367,7 +396,7 @@ export function HydrateFallback() {
         <Skeleton className="h-10 w-20" />
       </div>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <CourseCardSkeleton key={i} />
         ))}
       </div>
@@ -422,7 +451,7 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
       {/* Course Grid */}
       {isSearching ? (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {[1, 2, 3, 4, 5, 6].map((i) => (
             <CourseCardSkeleton key={i} />
           ))}
         </div>
@@ -455,11 +484,12 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                 <CardHeader>
                   <div className="mb-1 flex items-center gap-2 text-xs font-medium">
                     <span className="text-primary">{course.categoryName}</span>
-                    {currentUserId !== null && course.instructorId === currentUserId && (
-                      <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                        Your Course
-                      </span>
-                    )}
+                    {currentUserId !== null &&
+                      course.instructorId === currentUserId && (
+                        <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                          Your Course
+                        </span>
+                      )}
                   </div>
                   <h3 className="text-lg font-semibold leading-tight group-hover:text-primary">
                     {course.title}

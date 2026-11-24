@@ -1,6 +1,6 @@
 import { marked, Renderer } from "marked";
 import { type Highlighter, createHighlighter } from "shiki";
-import type { Markdown } from "~/lib/text";
+import type { Markdown, RenderedHtml } from "~/lib/text";
 
 // ─── Comment Rendering ───
 // Deliberately separate from renderMarkdown (~/lib/markdown.server).
@@ -80,7 +80,7 @@ function safeHref(href: string | null): string | null {
   }
 }
 
-export async function renderComment(markdown: Markdown): Promise<string> {
+export async function renderComment(markdown: Markdown): Promise<RenderedHtml> {
   const hl = await getHighlighter();
 
   const renderer = new Renderer();
@@ -110,5 +110,5 @@ export async function renderComment(markdown: Markdown): Promise<string> {
   // No images in comments — avoids tracking pixels and layout-breaking uploads.
   renderer.image = ({ text }) => escapeHtml(text ?? "");
 
-  return marked.parse(markdown, { renderer, async: false }) as string;
+  return marked.parse(markdown, { renderer, async: false }) as RenderedHtml;
 }

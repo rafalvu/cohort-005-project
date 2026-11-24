@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as schema from "~/db/schema";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { enrollStudent, isEnrolled } from "./enrollments.server";
-import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
-import { claimSeat } from "./seat-claims.server";
 import {
   fakeNotifications,
   type FakeNotifications,
 } from "./notifications.fake.server";
+import { approveRefundRequest, raiseRefundRequest } from "./refunds.server";
+import { claimSeat } from "./seat-claims.server";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
 
@@ -359,7 +359,7 @@ describe("the Seat claim Notification", () => {
     expect(isEnrolled(db, base.user.id, base.course.id)).toBe(true);
     expect(logged).toHaveBeenCalledWith(
       expect.stringContaining("seat-claimed:"),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     logged.mockRestore();
   });

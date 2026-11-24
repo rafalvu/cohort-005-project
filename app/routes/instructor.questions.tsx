@@ -1,23 +1,16 @@
+import { eq, ne, or, and, isNull, notExists, sql, desc } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, data, isRouteErrorResponse, useFetcher } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/instructor.questions";
-import { coursePermissions } from "~/modules/permissions/course-permissions.server";
-import { people } from "~/modules/permissions/person.server";
-import { renderComment } from "~/lib/comment-markdown.server";
-import { createComment } from "~/lib/comments.server";
-import { defaultNotifications } from "~/lib/notifications.server";
+import { RenderedHtmlBlock } from "~/components/rendered-html";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Textarea } from "~/components/ui/textarea";
 import { UserAvatar } from "~/components/user-avatar";
-import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
-import { cn, daysSince, formatRelativeTime } from "~/lib/utils";
-import { MAX_COMMENT_LENGTH } from "~/lib/comments";
-import { parseFormData } from "~/lib/validation";
-import type { Markdown } from "~/lib/text";
 import { db } from "~/db";
 import {
   comments,
@@ -27,8 +20,16 @@ import {
   users,
   UserRole,
 } from "~/db/schema";
-import { eq, ne, or, and, isNull, notExists, sql, desc } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
+import { renderComment } from "~/lib/comment-markdown.server";
+import { MAX_COMMENT_LENGTH } from "~/lib/comments";
+import { createComment } from "~/lib/comments.server";
+import { defaultNotifications } from "~/lib/notifications.server";
+import type { Markdown } from "~/lib/text";
+import { cn, daysSince, formatRelativeTime } from "~/lib/utils";
+import { formId, parseFormData } from "~/lib/validation";
+import { coursePermissions } from "~/modules/permissions/course-permissions.server";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/instructor.questions";
 
 type QueuedQuestion = {
   id: number;
@@ -111,7 +112,7 @@ const STALE_AFTER_DAYS = 3;
 
 const replySchema = z.object({
   intent: z.literal("reply"),
-  commentId: z.coerce.number().int(),
+  commentId: formId,
   body: z.string(),
 });
 
@@ -240,9 +241,9 @@ function QuestionCard({ question }: { question: Question }) {
                 {formatRelativeTime(question.createdAt)}
               </span>
             </div>
-            <div
+            <RenderedHtmlBlock
               className="prose prose-sm prose-neutral dark:prose-invert mt-1 max-w-none"
-              dangerouslySetInnerHTML={{ __html: question.bodyHtml }}
+              html={question.bodyHtml}
             />
           </div>
         </div>

@@ -1,7 +1,7 @@
 import { data } from "react-router";
-import type { Route } from "./+types/api.notification-feed-token";
-import { people } from "~/modules/permissions/person.server";
 import { defaultNotifications } from "~/lib/notifications.server";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/api.notification-feed-token";
 
 /**
  * A fresh signed user token for the signed-in person's Notification Feed. The

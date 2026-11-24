@@ -1,14 +1,4 @@
-import { Link } from "react-router";
-import type { Route } from "./+types/instructor";
-import { people } from "~/modules/permissions/person.server";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-} from "~/components/ui/card";
-import { Button } from "~/components/ui/button";
-import { Skeleton } from "~/components/ui/skeleton";
+import { inArray, eq, sql } from "drizzle-orm";
 import {
   AlertTriangle,
   BookOpen,
@@ -16,12 +6,22 @@ import {
   Plus,
   Users,
 } from "lucide-react";
+import { Link } from "react-router";
+import { isRouteErrorResponse } from "react-router";
 import { CourseImage } from "~/components/course-image";
-import { data, isRouteErrorResponse } from "react-router";
-import { CourseStatus } from "~/db/schema";
+import { Button } from "~/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+} from "~/components/ui/card";
+import { Skeleton } from "~/components/ui/skeleton";
 import { db } from "~/db";
+import { CourseStatus } from "~/db/schema";
 import { courses, modules, lessons, enrollments } from "~/db/schema";
-import { eq, or, sql } from "drizzle-orm";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/instructor";
 
 function getCoursesByInstructor(instructorId: number) {
   return db
@@ -43,7 +43,12 @@ function getLessonCountForCourse(courseId: number) {
   const count = db
     .select({ count: sql<number>`count(*)` })
     .from(lessons)
-    .where(or(...courseModules.map((m) => eq(lessons.moduleId, m.id)))!)
+    .where(
+      inArray(
+        lessons.moduleId,
+        courseModules.map((m) => m.id)
+      )
+    )
     .get();
 
   return count?.count ?? 0;
@@ -128,7 +133,7 @@ export function HydrateFallback() {
         <Skeleton className="h-10 w-32" />
       </div>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
+        {[1, 2, 3].map((i) => (
           <Card key={i} className="flex flex-col">
             <Skeleton className="aspect-video rounded-b-none rounded-t-lg" />
             <CardHeader>

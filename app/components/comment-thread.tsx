@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
+import { MessageSquare, Pencil, Reply, Trash2 } from "lucide-react";
+import { useEffectEvent, useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import { toast } from "sonner";
-import { MessageSquare, Pencil, Reply, Trash2 } from "lucide-react";
+import { RenderedHtmlBlock } from "~/components/rendered-html";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
 import { UserAvatar } from "~/components/user-avatar";
-import { cn, formatRelativeTime } from "~/lib/utils";
 import { MAX_COMMENT_LENGTH } from "~/lib/comments";
+import type { RenderedHtml } from "~/lib/text";
+import { cn, formatRelativeTime } from "~/lib/utils";
 
 // Bodies arrive pre-rendered from the server (renderComment), because comments
 // are untrusted markdown and the sanitising renderer is server-only.
@@ -15,7 +17,7 @@ export type RenderedComment = {
   id: number;
   /** Raw markdown — only used to populate the edit box. */
   body: string;
-  bodyHtml: string;
+  bodyHtml: RenderedHtml | "";
   createdAt: string;
   editedAt: string | null;
   deleted: boolean;
@@ -58,6 +60,7 @@ function CommentForm({
 }) {
   const fetcher = useFetcher<{ ok?: boolean; error?: string }>();
   const [body, setBody] = useState(defaultValue ?? "");
+  const finish = useEffectEvent(() => onDone?.());
   const submitting = fetcher.state !== "idle";
 
   useEffect(() => {
@@ -70,10 +73,8 @@ function CommentForm({
 
     if (fetcher.data.ok) {
       if (intent === "create-comment") setBody("");
-      onDone?.();
+      finish();
     }
-    // onDone is recreated each render by callers; depending on it would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetcher.state, fetcher.data, intent]);
 
   const tooLong = body.length > MAX_COMMENT_LENGTH;
@@ -277,9 +278,9 @@ function CommentItem({
               />
             </div>
           ) : (
-            <div
+            <RenderedHtmlBlock
               className="prose prose-sm prose-neutral dark:prose-invert mt-1 max-w-none"
-              dangerouslySetInnerHTML={{ __html: comment.bodyHtml }}
+              html={comment.bodyHtml}
             />
           )}
 

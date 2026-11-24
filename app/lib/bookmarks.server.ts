@@ -1,7 +1,8 @@
+import { and, desc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { and, desc, eq } from "drizzle-orm";
 import { bookmarks, courses, lessons, modules } from "~/db/schema";
+import { pageOf, PAGE_SIZE } from "~/lib/pagination";
 import { savedLessonColumns } from "~/lib/saved-lesson.server";
 
 export type Db = BetterSQLite3Database<typeof schema>;
@@ -50,18 +51,22 @@ export function toggleBookmark(
 }
 
 /** The Student's Bookmarks, newest first, each with its Lesson and Course. */
-export function listBookmarks(db: Db, studentId: number) {
-  return db
-    .select({
-      id: bookmarks.id,
-      createdAt: bookmarks.createdAt,
-      lesson: savedLessonColumns,
-    })
-    .from(bookmarks)
-    .innerJoin(lessons, eq(lessons.id, bookmarks.lessonId))
-    .innerJoin(modules, eq(modules.id, lessons.moduleId))
-    .innerJoin(courses, eq(courses.id, modules.courseId))
-    .where(eq(bookmarks.userId, studentId))
-    .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
-    .all();
+export function listBookmarks(db: Db, studentId: number, page = 1) {
+  return pageOf(
+    db
+      .select({
+        id: bookmarks.id,
+        createdAt: bookmarks.createdAt,
+        lesson: savedLessonColumns,
+      })
+      .from(bookmarks)
+      .innerJoin(lessons, eq(lessons.id, bookmarks.lessonId))
+      .innerJoin(modules, eq(modules.id, lessons.moduleId))
+      .innerJoin(courses, eq(courses.id, modules.courseId))
+      .where(eq(bookmarks.userId, studentId))
+      .orderBy(desc(bookmarks.createdAt), desc(bookmarks.id))
+      .limit(PAGE_SIZE + 1)
+      .offset((page - 1) * PAGE_SIZE)
+      .all()
+  );
 }

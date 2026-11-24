@@ -1,5 +1,17 @@
 import { data } from "react-router";
-import type { z } from "zod";
+import { z } from "zod";
+
+export const formPosition = z
+  .string()
+  .trim()
+  .regex(/^\d+$/)
+  .pipe(z.coerce.number().int().safe().nonnegative());
+
+export const formId = z
+  .string()
+  .trim()
+  .regex(/^\d+$/)
+  .pipe(z.coerce.number().int().safe().positive());
 
 type ParseSuccess<T> = { success: true; data: T };
 type ParseFailure = {
@@ -59,7 +71,13 @@ export async function parseJsonBody<T extends z.ZodType>(
   request: Request,
   schema: T
 ): Promise<ParseResult<z.infer<T>>> {
-  const raw = await request.json();
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return { success: false, errors: { body: "Invalid JSON." } };
+  }
   const result = schema.safeParse(raw);
 
   if (result.success) {

@@ -1,15 +1,15 @@
+import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { eq } from "drizzle-orm";
 import { comments, courses, lessons, modules } from "~/db/schema";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
-import { markdown } from "~/lib/text";
 import {
   archiveForCommentSafely,
   sendSafely,
   findNotificationPerson,
   type Notifications,
 } from "~/lib/notifications.server";
+import { markdown } from "~/lib/text";
 
 export type Db = BetterSQLite3Database<typeof schema>;
 

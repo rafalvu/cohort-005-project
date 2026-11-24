@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import * as schema from "~/db/schema";
 import { UserRole } from "~/db/schema";
 import { plainText } from "~/lib/text";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { getNote, listNotes, saveNote } from "./notes.server";
 
 const NOW = new Date(2026, 9, 6, 12, 0, 0);
@@ -48,7 +48,13 @@ describe("saving a Note", () => {
 
   it("replaces the body and moves the last-edited time on when saved again", () => {
     saveNote(db, base.user.id, lessonIds[0], "First thought", NOW);
-    saveNote(db, base.user.id, lessonIds[0], "Second thought", minutesAfterNow(5));
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "Second thought",
+      minutesAfterNow(5)
+    );
 
     expect(getNote(db, base.user.id, lessonIds[0])).toMatchObject({
       body: "Second thought",
@@ -61,23 +67,31 @@ describe("saving a Note", () => {
     saveNote(db, base.user.id, lessonIds[0], "First thought", NOW);
     saveNote(db, base.user.id, lessonIds[0], "Second thought", NOW);
 
-    expect(listNotes(db, base.user.id)).toHaveLength(1);
+    expect(listNotes(db, base.user.id).items).toHaveLength(1);
     expect(() =>
       db
         .insert(schema.notes)
-        .values({ userId: base.user.id, lessonId: lessonIds[0], body: plainText("Dupe") })
+        .values({
+          userId: base.user.id,
+          lessonId: lessonIds[0],
+          body: plainText("Dupe"),
+        })
         .run()
     ).toThrow();
   });
 
   it("accepts a Note of exactly 2000 characters", () => {
-    expect(saveNote(db, base.user.id, lessonIds[0], "a".repeat(2000), NOW)).toMatchObject({
+    expect(
+      saveNote(db, base.user.id, lessonIds[0], "a".repeat(2000), NOW)
+    ).toMatchObject({
       ok: true,
     });
   });
 
   it("refuses a Note over 2000 characters", () => {
-    expect(saveNote(db, base.user.id, lessonIds[0], "a".repeat(2001), NOW)).toEqual({
+    expect(
+      saveNote(db, base.user.id, lessonIds[0], "a".repeat(2001), NOW)
+    ).toEqual({
       ok: false,
       error: "Note must be 2000 characters or fewer",
     });
@@ -92,7 +106,13 @@ describe("saving a Note", () => {
   });
 
   it("keeps the body exactly as typed, Markdown characters included", () => {
-    saveNote(db, base.user.id, lessonIds[0], "# not a heading\n*not bold*", NOW);
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "# not a heading\n*not bold*",
+      NOW
+    );
 
     expect(getNote(db, base.user.id, lessonIds[0])?.body).toBe(
       "# not a heading\n*not bold*"
@@ -104,15 +124,25 @@ describe("listing Notes", () => {
   it("lists only the Student's own Notes, most recently edited first, with their Lesson and Course", () => {
     const other = db
       .insert(schema.users)
-      .values({ name: "Other", email: "other@example.com", role: UserRole.Student })
+      .values({
+        name: "Other",
+        email: "other@example.com",
+        role: UserRole.Student,
+      })
       .returning()
       .get();
     saveNote(db, base.user.id, lessonIds[0], "On lesson 1", NOW);
     saveNote(db, base.user.id, lessonIds[1], "On lesson 2", minutesAfterNow(5));
-    saveNote(db, base.user.id, lessonIds[0], "On lesson 1, edited", minutesAfterNow(10));
+    saveNote(
+      db,
+      base.user.id,
+      lessonIds[0],
+      "On lesson 1, edited",
+      minutesAfterNow(10)
+    );
     saveNote(db, other.id, lessonIds[0], "Someone else's", minutesAfterNow(15));
 
-    expect(listNotes(db, base.user.id)).toMatchObject([
+    expect(listNotes(db, base.user.id).items).toMatchObject([
       {
         body: "On lesson 1, edited",
         lesson: {

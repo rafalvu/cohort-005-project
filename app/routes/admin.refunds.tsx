@@ -1,34 +1,36 @@
+import { AlertTriangle, Receipt } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useFetcher, useSearchParams } from "react-router";
+import { data, isRouteErrorResponse, Link } from "react-router";
 import { toast } from "sonner";
 import { z } from "zod";
-import type { Route } from "./+types/admin.refunds";
-import { people } from "~/modules/permissions/person.server";
-import { parseFormData } from "~/lib/validation";
-import { RefundStatus } from "~/db/schema";
-import { db } from "~/db";
-import { Card, CardContent } from "~/components/ui/card";
+import { PageLinks } from "~/components/page-links";
 import { Button } from "~/components/ui/button";
+import { Card, CardContent } from "~/components/ui/card";
 import { Textarea } from "~/components/ui/textarea";
-import { AlertTriangle, Receipt } from "lucide-react";
-import { data, isRouteErrorResponse, Link } from "react-router";
-import { formatPrice } from "~/lib/utils";
+import { db } from "~/db";
+import { RefundStatus } from "~/db/schema";
+import { sendEmail } from "~/lib/mailer.server";
+import { defaultNotifications } from "~/lib/notifications.server";
+import { readPage } from "~/lib/pagination";
+import { RULE_BREAK_LABELS } from "~/lib/refund-rules";
 import {
   approveRefundRequest,
   declineRefundRequest,
   listRefundRequestsForReview,
   type RefundRequestForReview,
 } from "~/lib/refunds.server";
-import { RULE_BREAK_LABELS } from "~/lib/refund-rules";
-import { sendEmail } from "~/lib/mailer.server";
-import { defaultNotifications } from "~/lib/notifications.server";
+import { formatPrice } from "~/lib/utils";
+import { formId, parseFormData } from "~/lib/validation";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/admin.refunds";
 
 const refundFilterSchema = z.nativeEnum(RefundStatus).catch(RefundStatus.Open);
 
 const adminRefundActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("approve"),
-    refundRequestId: z.coerce.number().int(),
+    refundRequestId: formId,
     note: z
       .string()
       .trim()
@@ -37,7 +39,7 @@ const adminRefundActionSchema = z.discriminatedUnion("intent", [
   }),
   z.object({
     intent: z.literal("decline"),
-    refundRequestId: z.coerce.number().int(),
+    refundRequestId: formId,
     note: z
       .string()
       .trim()
@@ -58,9 +60,11 @@ export async function loader({ request, url }: Route.LoaderArgs) {
 
   const status = refundFilterSchema.parse(url.searchParams.get("status"));
 
+  const page = readPage(url);
   return {
+    page,
     status,
-    refundRequests: listRefundRequestsForReview(db, status, new Date()),
+    refundRequests: listRefundRequestsForReview(db, status, new Date(), page),
   };
 }
 
@@ -159,7 +163,12 @@ export default function AdminRefunds({ loaderData }: Route.ComponentProps) {
         ))}
       </div>
 
-      {refundRequests.length === 0 ? (
+      <PageLinks
+        label="Refund pages"
+        page={loaderData.page}
+        hasNext={refundRequests.hasNext}
+      />
+      {refundRequests.items.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center">
             <Receipt className="mx-auto mb-3 size-10 text-muted-foreground" />
@@ -170,7 +179,7 @@ export default function AdminRefunds({ loaderData }: Route.ComponentProps) {
         </Card>
       ) : (
         <div className="space-y-4">
-          {refundRequests.map((refundRequest) => (
+          {refundRequests.items.map((refundRequest) => (
             <RefundRequestCard
               key={refundRequest.id}
               refundRequest={refundRequest}

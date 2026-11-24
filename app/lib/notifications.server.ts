@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { existsSync } from "node:fs";
 import * as schema from "~/db/schema";
 import { users } from "~/db/schema";
 import type {
@@ -9,6 +9,7 @@ import type {
   NotificationKind,
 } from "~/lib/notification-feed";
 import type { NotificationPreferences } from "~/lib/notification-preferences";
+import { logInfo, logError } from "./log.server";
 
 // ─── Notifications port ───
 // Cadence's side of sending Notifications (see GLOSSARY.md). Services take a
@@ -127,10 +128,7 @@ export async function tolerateNotificationFailure<T>(
   try {
     return await run();
   } catch (error) {
-    console.error(
-      `[notifications] ${failureMessage}:`,
-      error instanceof Error ? error.message : error
-    );
+    logError(`[notifications] ${failureMessage}:`, error);
     return fallback;
   }
 }
@@ -169,16 +167,15 @@ export async function sendSafely(
 export function loggingNotifications(): Notifications {
   return {
     async send(notification, idempotencyKey) {
-      console.info(
-        `[notifications] (no KNOCK_SECRET_API_KEY) ${idempotencyKey} → user ${notification.recipient.id}`,
-        notification.data
+      logInfo(
+        `[notifications] (no KNOCK_SECRET_API_KEY) ${idempotencyKey} → user ${notification.recipient.id}`
       );
     },
     async feedCredentials() {
       return null;
     },
     async identifyUser(person) {
-      console.info(
+      logInfo(
         `[notifications] (no KNOCK_SECRET_API_KEY) sync user ${person.id}`
       );
     },
@@ -186,13 +183,12 @@ export function loggingNotifications(): Notifications {
       return null;
     },
     async mergePreferences(userId, preferences) {
-      console.info(
-        `[notifications] (no KNOCK_SECRET_API_KEY) preferences for user ${userId}`,
-        preferences
+      logInfo(
+        `[notifications] (no KNOCK_SECRET_API_KEY) preferences for user ${userId}`
       );
     },
     async archiveForComment(commentId) {
-      console.info(
+      logInfo(
         `[notifications] (no KNOCK_SECRET_API_KEY) archive for comment:${commentId}`
       );
     },

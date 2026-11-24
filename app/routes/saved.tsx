@@ -1,12 +1,14 @@
+import { Bookmark, NotebookPen } from "lucide-react";
 import { Link } from "react-router";
-import type { Route } from "./+types/saved";
+import { PageLinks } from "~/components/page-links";
+import { Card, CardContent } from "~/components/ui/card";
 import { db } from "~/db";
-import { people } from "~/modules/permissions/person.server";
 import { listBookmarks } from "~/lib/bookmarks.server";
 import { listNotes } from "~/lib/notes.server";
-import { Card, CardContent } from "~/components/ui/card";
-import { Bookmark, NotebookPen } from "lucide-react";
+import { readPage } from "~/lib/pagination";
 import { formatRelativeTime } from "~/lib/utils";
+import { people } from "~/modules/permissions/person.server";
+import type { Route } from "./+types/saved";
 
 export function meta() {
   return [
@@ -18,9 +20,14 @@ export function meta() {
 export async function loader({ request }: Route.LoaderArgs) {
   const { id: userId } = await people.requirePerson(request);
 
+  const url = new URL(request.url);
+  const bookmarksPage = readPage(url, "bookmarksPage");
+  const notesPage = readPage(url, "notesPage");
   return {
-    savedBookmarks: listBookmarks(db, userId),
-    savedNotes: listNotes(db, userId),
+    bookmarksPage,
+    notesPage,
+    savedBookmarks: listBookmarks(db, userId, bookmarksPage),
+    savedNotes: listNotes(db, userId, notesPage),
   };
 }
 
@@ -43,7 +50,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
             Bookmarks
           </h2>
 
-          {savedBookmarks.length === 0 ? (
+          {savedBookmarks.items.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-sm text-muted-foreground">
                 No bookmarks yet.
@@ -51,11 +58,17 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
             </Card>
           ) : (
             <div className="space-y-2">
-              {savedBookmarks.map((bookmark) => (
+              {savedBookmarks.items.map((bookmark) => (
                 <SavedLessonCard key={bookmark.id} lesson={bookmark.lesson} />
               ))}
             </div>
           )}
+          <PageLinks
+            label="Bookmark pages"
+            parameter="bookmarksPage"
+            page={loaderData.bookmarksPage}
+            hasNext={savedBookmarks.hasNext}
+          />
         </section>
 
         <section>
@@ -64,7 +77,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
             Notes
           </h2>
 
-          {savedNotes.length === 0 ? (
+          {savedNotes.items.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center text-sm text-muted-foreground">
                 No notes yet.
@@ -72,7 +85,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
             </Card>
           ) : (
             <div className="space-y-2">
-              {savedNotes.map((note) => (
+              {savedNotes.items.map((note) => (
                 <SavedLessonCard key={note.id} lesson={note.lesson}>
                   {/* Plain text — a Note is never rendered as Markdown. */}
                   <p className="whitespace-pre-wrap text-sm">{note.body}</p>
@@ -86,6 +99,12 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
               ))}
             </div>
           )}
+          <PageLinks
+            label="Note pages"
+            parameter="notesPage"
+            page={loaderData.notesPage}
+            hasNext={savedNotes.hasNext}
+          />
         </section>
       </div>
     </div>
@@ -93,7 +112,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
 }
 
 type SavedLesson =
-  Route.ComponentProps["loaderData"]["savedBookmarks"][number]["lesson"];
+  Route.ComponentProps["loaderData"]["savedBookmarks"]["items"][number]["lesson"];
 
 /** A row on the Saved page: a link to the Lesson, named with its Course. */
 function SavedLessonCard({

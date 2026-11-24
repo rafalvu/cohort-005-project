@@ -1,9 +1,3 @@
-import { NavLink, Form } from "react-router";
-import { useState, useEffect } from "react";
-import { cn } from "~/lib/utils";
-import { UserRole } from "~/db/schema";
-import { UserAvatar } from "~/components/user-avatar";
-import { NotificationBell } from "~/components/notification-feed";
 import {
   Bookmark,
   BookOpen,
@@ -21,6 +15,12 @@ import {
   LogOut,
   Settings,
 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { NavLink, Form } from "react-router";
+import { NotificationBell } from "~/components/notification-feed";
+import { UserAvatar } from "~/components/user-avatar";
+import { UserRole } from "~/db/schema";
+import { cn } from "~/lib/utils";
 
 interface CurrentUser {
   id: number;

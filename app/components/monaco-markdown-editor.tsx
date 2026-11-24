@@ -1,6 +1,12 @@
-import { useRef, useCallback, useState, useEffect, type ComponentType } from "react";
 import type { EditorProps, OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
+import {
+  useRef,
+  useCallback,
+  useState,
+  useEffect,
+  type ComponentType,
+} from "react";
 
 interface MonacoMarkdownEditorProps {
   value: string;
@@ -35,6 +41,7 @@ export function MonacoMarkdownEditor({
       inherit: true,
       rules: [],
       colors: {
+        /* eslint-disable no-restricted-syntax -- Monaco requires concrete values for its editor palette. */
         "editor.background": "#0a0a0a",
         "editor.foreground": "#e5e5e5",
         "editorLineNumber.foreground": "#525252",
@@ -46,14 +53,17 @@ export function MonacoMarkdownEditor({
         "editorWidget.border": "#262626",
         "input.background": "#171717",
         "input.border": "#262626",
-        "focusBorder": "#525252",
+        focusBorder: "#525252",
+        /* eslint-enable no-restricted-syntax */
       },
     });
     monaco.editor.setTheme("cadence-dark");
 
     // Register Prettier as Monaco's native document formatter for Markdown
     monaco.languages.registerDocumentFormattingEditProvider("markdown", {
-      provideDocumentFormattingEdits: async (model: Monaco.editor.ITextModel) => {
+      provideDocumentFormattingEdits: async (
+        model: Monaco.editor.ITextModel
+      ) => {
         try {
           const [prettier, markdownPlugin] = await Promise.all([
             import("prettier/standalone"),
@@ -78,19 +88,14 @@ export function MonacoMarkdownEditor({
     });
 
     // Ctrl+S / Cmd+S to format with Prettier then save
-    editor.addCommand(
-      monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-      async () => {
-        const formatAction = editor.getAction(
-          "editor.action.formatDocument"
-        );
-        if (formatAction) {
-          await formatAction.run();
-          onChangeRef.current(editor.getValue());
-        }
-        onSaveRef.current?.();
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, async () => {
+      const formatAction = editor.getAction("editor.action.formatDocument");
+      if (formatAction) {
+        await formatAction.run();
+        onChangeRef.current(editor.getValue());
       }
-    );
+      onSaveRef.current?.();
+    });
   }, []);
 
   if (!Editor) {

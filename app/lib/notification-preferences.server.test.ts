@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import { eq } from "drizzle-orm";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as schema from "~/db/schema";
+import { createTestDb, seedBaseData, type TestDb } from "~/test/setup";
 import {
   getFeedPreferences,
   setFeedPreference,
@@ -98,7 +98,7 @@ describe("syncing a user", () => {
 
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining(`sync user ${base.user.id}`),
-      "Knock is down"
+      expect.stringContaining("Knock is down")
     );
     error.mockRestore();
   });

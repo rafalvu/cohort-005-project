@@ -1,9 +1,10 @@
+import { and, desc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "~/db/schema";
-import { and, desc, eq } from "drizzle-orm";
 import { courses, lessons, modules, notes } from "~/db/schema";
-import { savedLessonColumns } from "~/lib/saved-lesson.server";
 import { MAX_NOTE_LENGTH } from "~/lib/notes";
+import { pageOf, PAGE_SIZE } from "~/lib/pagination";
+import { savedLessonColumns } from "~/lib/saved-lesson.server";
 import { plainText } from "~/lib/text";
 
 // Nothing outside the owning Student's Lesson page and Saved page may read a
@@ -26,7 +27,8 @@ export function getNote(
     .get();
 }
 
-export type SaveNoteResult = { ok: true; note: Note } | { ok: false; error: string };
+export type SaveNoteResult =
+  { ok: true; note: Note } | { ok: false; error: string };
 
 /**
  * Writes the Student's Note on the Lesson. Saving again replaces the body and
@@ -71,19 +73,23 @@ export function saveNote(
 }
 
 /** The Student's Notes, most recently edited first, each with its Lesson and Course. */
-export function listNotes(db: Db, studentId: number) {
-  return db
-    .select({
-      id: notes.id,
-      body: notes.body,
-      updatedAt: notes.updatedAt,
-      lesson: savedLessonColumns,
-    })
-    .from(notes)
-    .innerJoin(lessons, eq(lessons.id, notes.lessonId))
-    .innerJoin(modules, eq(modules.id, lessons.moduleId))
-    .innerJoin(courses, eq(courses.id, modules.courseId))
-    .where(eq(notes.userId, studentId))
-    .orderBy(desc(notes.updatedAt), desc(notes.id))
-    .all();
+export function listNotes(db: Db, studentId: number, page = 1) {
+  return pageOf(
+    db
+      .select({
+        id: notes.id,
+        body: notes.body,
+        updatedAt: notes.updatedAt,
+        lesson: savedLessonColumns,
+      })
+      .from(notes)
+      .innerJoin(lessons, eq(lessons.id, notes.lessonId))
+      .innerJoin(modules, eq(modules.id, lessons.moduleId))
+      .innerJoin(courses, eq(courses.id, modules.courseId))
+      .where(eq(notes.userId, studentId))
+      .orderBy(desc(notes.updatedAt), desc(notes.id))
+      .limit(PAGE_SIZE + 1)
+      .offset((page - 1) * PAGE_SIZE)
+      .all()
+  );
 }

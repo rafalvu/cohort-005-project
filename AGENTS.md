@@ -6,7 +6,7 @@ Do these checks in this order before you report a change to `app/` as complete:
 2. `npm run lint:boundaries`
 3. `npm run test`
 
-Or run all three with `npm run check`.
+Run `npm run check` on Node 24 for the full CI checks, including lint, formatting, repository checks, and the production client build. After the build, `npm run test:browser` runs the Chromium accessibility checks.
 
 Modules are deep modules: see [app/modules/README.md](./app/modules/README.md) before adding or importing one.
 
