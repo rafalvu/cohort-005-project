@@ -1,10 +1,9 @@
 import { Link, isRouteErrorResponse, useSearchParams } from "react-router";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import type { Route } from "./+types/instructor.analytics";
-import { requireInstructorOrAdmin } from "~/lib/access.server";
+import { getInstructorReport } from "~/modules/instructor-operations/reporting.server";
 import { db } from "~/db";
 import {
-  getInstructorAnalytics,
   type RevenueSeries,
   type TopBuyer,
   type CourseProgressSummary,
@@ -41,7 +40,6 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
 import { AlertTriangle, Rocket } from "lucide-react";
 
-
 // ─── Instructor Analytics ───
 // What an instructor earned, and when. Three money figures rather than one:
 // a lone number here gets read as "what I get paid", and the platform's 20%
@@ -69,13 +67,8 @@ export function meta() {
   ];
 }
 
-export async function loader({ request, url }: Route.LoaderArgs) {
-  const viewer = await requireInstructorOrAdmin(request);
-  return getInstructorAnalytics(db, {
-    viewer,
-    searchParams: url.searchParams,
-    now: new Date(),
-  });
+export async function loader({ request }: Route.LoaderArgs) {
+  return getInstructorReport(db, request, new Date());
 }
 
 function MoneyCard({

@@ -1,15 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link, redirect, useFetcher } from "react-router";
-import { toast } from "sonner";
-import { z } from "zod";
 import type { Route } from "./+types/instructor.new";
-import { getCurrentUserId } from "~/lib/session";
-import { parseFormData } from "~/lib/validation";
-import { markdown } from "~/lib/text";
-import { UserRole } from "~/db/schema";
 import { db } from "~/db";
-import { users, categories, courses, CourseStatus } from "~/db/schema";
-import { eq } from "drizzle-orm";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -23,63 +15,12 @@ import {
   SelectValue,
 } from "~/components/ui/select";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
-import { data, isRouteErrorResponse } from "react-router";
+import { isRouteErrorResponse } from "react-router";
 
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-function getAllCategories() {
-  return db.select().from(categories).orderBy(categories.name).all();
-}
-
-function generateSlug(name: string) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function getCourseBySlug(slug: string) {
-  return db.select().from(courses).where(eq(courses.slug, slug)).get();
-}
-
-function createCourse(
-  title: string,
-  slug: string,
-  description: string,
-  salesCopy: string,
-  instructorId: number,
-  categoryId: number,
-  coverImageUrl: string | null
-) {
-  if (salesCopy.trim().length === 0) {
-    throw new Error("Sales copy cannot be empty");
-  }
-
-  return db
-    .insert(courses)
-    .values({
-      title,
-      slug,
-      description,
-      salesCopy: markdown(salesCopy),
-      instructorId,
-      categoryId,
-      status: CourseStatus.Draft,
-      coverImageUrl,
-    })
-    .returning()
-    .get();
-}
-
-const newCourseSchema = z.object({
-  title: z.string().trim().min(1, "Title is required."),
-  description: z.string().trim().min(1, "Description is required."),
-  salesCopy: z.string().trim().min(1, "Sales copy is required."),
-  categoryId: z.string().min(1, "Category is required."),
-  coverImageUrl: z.string().trim().optional(),
-});
+import {
+  getCourseCreation,
+  createInstructorCourse,
+} from "~/modules/instructor-operations/reporting.server";
 
 export function meta() {
   return [
@@ -89,95 +30,21 @@ export function meta() {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to create a course.", {
-      status: 401,
-    });
-  }
-
-  const user = getUserById(currentUserId);
-
-  if (!user || user.role !== UserRole.Instructor) {
-    throw data("Only instructors can create courses.", {
-      status: 403,
-    });
-  }
-
-  const categories = getAllCategories();
-
-  return { categories };
+  return getCourseCreation(db, request);
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("You must be logged in to create a course.", { status: 401 });
-  }
-
-  const user = getUserById(currentUserId);
-
-  if (!user || user.role !== UserRole.Instructor) {
-    throw data("Only instructors can create courses.", { status: 403 });
-  }
-
-  const formData = await request.formData();
-  const parsed = parseFormData(formData, newCourseSchema);
-
-  if (!parsed.success) {
-    return data({ errors: parsed.errors }, { status: 400 });
-  }
-
-  const { title, description, salesCopy, categoryId, coverImageUrl } =
-    parsed.data;
-
-  const slug = generateSlug(title);
-
-  const existingCourse = getCourseBySlug(slug);
-  if (existingCourse) {
-    return data(
-      {
-        errors: {
-          title: "A course with a similar title already exists.",
-        } as Record<string, string>,
-      },
-      { status: 400 }
-    );
-  }
-
-  const course = createCourse(
-    title,
-    slug,
-    description,
-    salesCopy,
-    currentUserId,
-    parseInt(categoryId, 10),
-    coverImageUrl || null
-  );
-
+  const course = await createInstructorCourse(db, request);
   throw redirect(`/courses/${course.slug}`);
 }
 
 export default function InstructorNewCourse({
   loaderData,
-  actionData,
 }: Route.ComponentProps) {
   const { categories } = loaderData;
-  const errors = actionData?.errors;
   const fetcher = useFetcher();
   const isSubmitting = fetcher.state !== "idle";
   const [selectedCategory, setSelectedCategory] = useState("");
-
-  useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data?.errors) {
-      const firstError = Object.values(fetcher.data.errors)[0];
-      if (firstError) {
-        toast.error(firstError as string);
-      }
-    }
-  }, [fetcher.state, fetcher.data]);
 
   return (
     <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -218,11 +85,7 @@ export default function InstructorNewCourse({
                 id="title"
                 name="title"
                 placeholder="e.g., Introduction to TypeScript"
-                aria-invalid={errors?.title ? true : undefined}
               />
-              {errors?.title && (
-                <p className="text-sm text-destructive">{errors.title}</p>
-              )}
               <p className="text-xs text-muted-foreground">
                 The URL slug will be auto-generated from the title.
               </p>
@@ -236,11 +99,7 @@ export default function InstructorNewCourse({
                 name="description"
                 placeholder="Describe what students will learn in this course..."
                 rows={4}
-                aria-invalid={errors?.description ? true : undefined}
               />
-              {errors?.description && (
-                <p className="text-sm text-destructive">{errors.description}</p>
-              )}
             </div>
 
             {/* Sales Copy */}
@@ -251,11 +110,7 @@ export default function InstructorNewCourse({
                 name="salesCopy"
                 placeholder="Write the long-form pitch shown on the public course page..."
                 rows={8}
-                aria-invalid={errors?.salesCopy ? true : undefined}
               />
-              {errors?.salesCopy && (
-                <p className="text-sm text-destructive">{errors.salesCopy}</p>
-              )}
               <p className="text-xs text-muted-foreground">
                 Markdown. Shown on the public course page — you can refine it
                 later in the course editor.
@@ -270,10 +125,7 @@ export default function InstructorNewCourse({
                 value={selectedCategory}
                 onValueChange={setSelectedCategory}
               >
-                <SelectTrigger
-                  className="w-full"
-                  aria-invalid={errors?.categoryId ? true : undefined}
-                >
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select a category" />
                 </SelectTrigger>
                 <SelectContent>
@@ -284,9 +136,6 @@ export default function InstructorNewCourse({
                   ))}
                 </SelectContent>
               </Select>
-              {errors?.categoryId && (
-                <p className="text-sm text-destructive">{errors.categoryId}</p>
-              )}
             </div>
 
             {/* Cover Image URL */}
