@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requireCurrentPerson } from "~/lib/current-person.server";
 import {
   getCoursePermissions,
-  requireCurrentPerson,
-  requireCourseContent,
   requireCourseManagement,
   requireInstructorOrAdmin,
 } from "~/modules/course-permissions/index.server";
@@ -129,7 +128,7 @@ describe("protected permission entry points", () => {
   it("checks live identity, identifier, existing course, then permission", async () => {
     const student = await requestFor(f.user.id);
     const admin = await requestFor(f.addPerson(UserRole.Admin).id);
-    for (const guard of [requireCourseContent, requireCourseManagement]) {
+    for (const guard of [requireCourseManagement]) {
       await expect(
         guard(f.db, await requestFor(999999), -1)
       ).rejects.toMatchObject({ init: { status: 401 } });

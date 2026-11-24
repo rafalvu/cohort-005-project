@@ -27,6 +27,17 @@ const PACKAGE_INTERNALS = `^${R}/[^/]+/[^/]+/`;
 module.exports = {
   forbidden: [
     {
+      name: "course-offerings-no-global-db",
+      comment:
+        "Course offering operations receive their database from the caller.",
+      severity: "error",
+      from: {
+        path: `^${R}/course-offerings/`,
+        pathNot: `^${R}/course-offerings/tests/`,
+      },
+      to: { path: "^app/db/index\\.ts$" },
+    },
+    {
       name: "instructor-operations-no-global-db",
       comment: "Instructor operations receive their database from the caller.",
       severity: "error",

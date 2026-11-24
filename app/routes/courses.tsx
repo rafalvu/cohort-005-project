@@ -12,6 +12,7 @@ import {
   courseRatings,
   CourseStatus,
   LessonProgressStatus,
+  UserRole,
 } from "~/db/schema";
 import { eq, like, and, or, sql, inArray } from "drizzle-orm";
 import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
@@ -20,7 +21,7 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { AlertTriangle, BookOpen, Search } from "lucide-react";
 import { CourseImage } from "~/components/course-image";
 import { UserAvatar } from "~/components/user-avatar";
-import { getCurrentUserId } from "~/lib/session";
+import { getCurrentPerson } from "~/lib/current-person.server";
 import { formatPrice } from "~/lib/utils";
 import { resolveCountry } from "~/lib/country.server";
 import { calculatePppPrice } from "~/lib/ppp";
@@ -291,7 +292,8 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     0
   );
 
-  const currentUserId = await getCurrentUserId(request);
+  const currentPerson = await getCurrentPerson(db, request);
+  const currentUserId = currentPerson?.id ?? null;
   const country = await resolveCountry(request);
 
   // Build a map of courseId -> progress for enrolled courses
@@ -319,6 +321,9 @@ export async function loader({ request, url }: Route.LoaderArgs) {
     const rating = ratingSummaries.get(course.id);
     return {
       ...course,
+      isOwningInstructor:
+        currentPerson?.role === UserRole.Instructor &&
+        course.instructorId === currentPerson.id,
       lessonCount: getLessonCountForCourse(course.id),
       progress: userProgress?.progress ?? null,
       completedLessons: userProgress?.completedLessons ?? null,
@@ -455,7 +460,7 @@ export default function CourseCatalog({ loaderData }: Route.ComponentProps) {
                 <CardHeader>
                   <div className="mb-1 flex items-center gap-2 text-xs font-medium">
                     <span className="text-primary">{course.categoryName}</span>
-                    {currentUserId !== null && course.instructorId === currentUserId && (
+                    {course.isOwningInstructor && (
                       <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                         Your Course
                       </span>

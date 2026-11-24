@@ -8,7 +8,7 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import type { Route } from "./+types/instructor.$courseId";
-import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
 import {
   getCourseEditor,
   updateCourseSettings,

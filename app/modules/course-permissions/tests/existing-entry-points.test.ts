@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RouterContextProvider } from "react-router";
-import { eq } from "drizzle-orm";
 import type { TestDb } from "~/test/setup";
-import { lessons, modules, users, UserRole } from "~/db/schema";
+import { lessons, modules } from "~/db/schema";
 import { isBookmarked } from "~/lib/bookmarks.server";
-import { requireStaff, requireUserId } from "~/lib/access.server";
 import { action } from "~/routes/courses.$slug.lessons.$lessonId";
 import { permissionFixture, requestFor } from "./fixtures";
 
@@ -59,26 +57,4 @@ it("uses every Purchase when the existing lesson action changes a Bookmark", asy
     })
   ).toMatchObject({ ok: true, bookmarked: true });
   expect(isBookmarked(f.db, f.user.id, lesson.id)).toBe(true);
-});
-
-it("removes the existing management exemption as soon as the owner is demoted", async () => {
-  const request = await requestFor(f.instructor.id);
-  expect(await requireStaff(request, f.course.id)).toMatchObject({
-    isOwningInstructor: true,
-  });
-  f.db
-    .update(users)
-    .set({ role: UserRole.Student })
-    .where(eq(users.id, f.instructor.id))
-    .run();
-
-  await expect(requireStaff(request, f.course.id)).rejects.toMatchObject({
-    init: { status: 403 },
-  });
-});
-
-it("rejects a stale session through the existing signed-in entry point", async () => {
-  await expect(requireUserId(await requestFor(999999))).rejects.toMatchObject({
-    init: { status: 401 },
-  });
 });

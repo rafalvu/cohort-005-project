@@ -34,7 +34,7 @@ import { completeLesson } from "~/modules/lesson-operations/activity.server";
 import { updateLessonDiscussion } from "~/modules/lesson-operations/discussions.server";
 import { updateLessonPersonalData } from "~/modules/lesson-operations/personal.server";
 import { submitQuiz } from "~/modules/lesson-operations/quizzes.server";
-import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
 import { YouTubePlayer } from "~/components/youtube-player";
 import { data, isRouteErrorResponse } from "react-router";
 

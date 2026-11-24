@@ -3,10 +3,8 @@ import { z } from "zod";
 import { toggleBookmark } from "~/lib/bookmarks.server";
 import { saveNote } from "~/lib/notes.server";
 import { MAX_NOTE_LENGTH } from "~/lib/notes";
-import {
-  getCoursePermissions,
-  requireCurrentPerson,
-} from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
+import { getCoursePermissions } from "~/modules/course-permissions/index.server";
 import { resolveLessonTarget, type LessonDatabase } from "./targets.server";
 
 const commandSchema = z.discriminatedUnion("intent", [

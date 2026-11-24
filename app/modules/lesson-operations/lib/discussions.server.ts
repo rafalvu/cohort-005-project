@@ -9,10 +9,8 @@ import {
 } from "~/lib/comments.server";
 import { MAX_COMMENT_LENGTH, MIN_COMMENT_LENGTH } from "~/lib/comments";
 import type { Notifications } from "~/lib/notifications.server";
-import {
-  getCoursePermissions,
-  requireCurrentPerson,
-} from "~/modules/course-permissions/index.server";
+import { requireCurrentPerson } from "~/lib/current-person.server";
+import { getCoursePermissions } from "~/modules/course-permissions/index.server";
 import {
   positiveIdSchema,
   resolveLessonTarget,

@@ -1,104 +1,10 @@
-import { Link, redirect } from "react-router";
+import { Link } from "react-router";
 import type { Route } from "./+types/courses.$slug.welcome";
 import { db } from "~/db";
-import {
-  courses,
-  categories,
-  users,
-  modules,
-  lessons,
-  enrollments,
-} from "~/db/schema";
-import { eq, and, or } from "drizzle-orm";
-import { getCurrentUserId } from "~/lib/session";
+import { getCourseWelcome } from "~/modules/course-offerings/index.server";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import { PartyPopper, MessageCircle, PlayCircle } from "lucide-react";
-import { data } from "react-router";
-
-function getCourseBySlug(slug: string) {
-  return db.select().from(courses).where(eq(courses.slug, slug)).get();
-}
-
-function getCourseWithDetails(id: number) {
-  const course = db
-    .select({
-      id: courses.id,
-      title: courses.title,
-      slug: courses.slug,
-      description: courses.description,
-      salesCopy: courses.salesCopy,
-      instructorId: courses.instructorId,
-      categoryId: courses.categoryId,
-      status: courses.status,
-      coverImageUrl: courses.coverImageUrl,
-      price: courses.price,
-      pppEnabled: courses.pppEnabled,
-      createdAt: courses.createdAt,
-      updatedAt: courses.updatedAt,
-      instructorName: users.name,
-      instructorAvatarUrl: users.avatarUrl,
-      instructorBio: users.bio,
-      categoryName: categories.name,
-    })
-    .from(courses)
-    .innerJoin(users, eq(courses.instructorId, users.id))
-    .innerJoin(categories, eq(courses.categoryId, categories.id))
-    .where(eq(courses.id, id))
-    .get();
-
-  if (!course) return null;
-
-  const courseModules = db
-    .select({ id: modules.id, title: modules.title })
-    .from(modules)
-    .where(eq(modules.courseId, id))
-    .orderBy(modules.position)
-    .all();
-
-  const moduleIds = courseModules.map((m) => m.id);
-
-  const courseLessons =
-    moduleIds.length > 0
-      ? db
-          .select({
-            id: lessons.id,
-            moduleId: lessons.moduleId,
-            title: lessons.title,
-            durationMinutes: lessons.durationMinutes,
-          })
-          .from(lessons)
-          .where(or(...moduleIds.map((mid) => eq(lessons.moduleId, mid)))!)
-          .orderBy(lessons.position)
-          .all()
-      : [];
-
-  return {
-    ...course,
-    modules: courseModules.map((mod) => ({
-      id: mod.id,
-      title: mod.title,
-      lessons: courseLessons
-        .filter((lesson) => lesson.moduleId === mod.id)
-        .map((lesson) => ({
-          id: lesson.id,
-          title: lesson.title,
-          durationMinutes: lesson.durationMinutes,
-        })),
-    })),
-  };
-}
-
-function isUserEnrolled(userId: number, courseId: number) {
-  const enrollment = db
-    .select()
-    .from(enrollments)
-    .where(
-      and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId))
-    )
-    .get();
-  return !!enrollment;
-}
 
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Welcome";
@@ -109,33 +15,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
-  const slug = params.slug;
-  const course = getCourseBySlug(slug);
-
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  const currentUserId = await getCurrentUserId(request);
-  if (!currentUserId) {
-    throw redirect(`/courses/${slug}`);
-  }
-
-  if (!isUserEnrolled(currentUserId, course.id)) {
-    throw redirect(`/courses/${slug}`);
-  }
-
-  const courseWithDetails = getCourseWithDetails(course.id);
-  if (!courseWithDetails) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  const discordInviteUrl = process.env.DISCORD_INVITE_URL || null;
-
-  return {
-    course: courseWithDetails,
-    discordInviteUrl,
-  };
+  return getCourseWelcome(db, request, params.slug);
 }
 
 export default function Welcome({ loaderData }: Route.ComponentProps) {

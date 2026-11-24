@@ -14,9 +14,9 @@ import {
   users,
   UserRole,
 } from "~/db/schema";
+import { requireCurrentPerson } from "~/lib/current-person.server";
 import {
   requireInstructorOrAdmin,
-  requireCurrentPerson,
   requireCourseManagement,
 } from "~/modules/course-permissions/index.server";
 import { renderComment } from "~/lib/comment-markdown.server";
