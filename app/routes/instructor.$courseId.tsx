@@ -17,12 +17,16 @@ import {
   deleteCourseSection,
   reorderCourseSections,
 } from "~/modules/instructor-operations/course-editor.server";
+import {
+  createLesson,
+  renameLesson,
+  deleteLesson,
+  moveLesson,
+  reorderLessons,
+} from "~/modules/instructor-operations/lessons.server";
 import { defaultNotifications } from "~/lib/notifications.server";
-import { markdown } from "~/lib/text";
-import { CourseStatus, UserRole } from "~/db/schema";
+import { CourseStatus } from "~/db/schema";
 import { db } from "~/db";
-import { courses, modules, lessons } from "~/db/schema";
-import { eq, and, sql, gt, gte } from "drizzle-orm";
 import { formatDuration, formatPrice } from "~/lib/utils";
 import { MonacoMarkdownEditor } from "~/components/monaco-markdown-editor";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
@@ -55,155 +59,6 @@ import {
   FileText,
 } from "lucide-react";
 import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
-import { parseFormData, parseParams } from "~/lib/validation";
-
-function getCourseById(id: number) {
-  return db.select().from(courses).where(eq(courses.id, id)).get();
-}
-
-function getModuleById(id: number) {
-  return db.select().from(modules).where(eq(modules.id, id)).get();
-}
-
-function getLessonById(id: number) {
-  return db.select().from(lessons).where(eq(lessons.id, id)).get();
-}
-
-function getLessonsByModule(moduleId: number) {
-  return db
-    .select()
-    .from(lessons)
-    .where(eq(lessons.moduleId, moduleId))
-    .orderBy(lessons.position)
-    .all();
-}
-
-function createLesson(
-  moduleId: number,
-  title: string,
-  content: string | null,
-  videoUrl: string | null,
-  position: number | null,
-  durationMinutes: number | null
-) {
-  const pos =
-    position ??
-    db
-      .select({ max: sql<number>`coalesce(max(${lessons.position}), 0)` })
-      .from(lessons)
-      .where(eq(lessons.moduleId, moduleId))
-      .get()!.max + 1;
-
-  return db
-    .insert(lessons)
-    .values({
-      moduleId,
-      title,
-      content: content === null ? null : markdown(content),
-      videoUrl,
-      position: pos,
-      durationMinutes,
-    })
-    .returning()
-    .get();
-}
-
-function updateLessonTitle(id: number, title: string) {
-  return db
-    .update(lessons)
-    .set({ title })
-    .where(eq(lessons.id, id))
-    .returning()
-    .get();
-}
-
-function deleteLesson(id: number) {
-  return db.delete(lessons).where(eq(lessons.id, id)).returning().get();
-}
-
-function reorderLessons(moduleId: number, lessonIds: number[]) {
-  for (let i = 0; i < lessonIds.length; i++) {
-    db.update(lessons)
-      .set({ position: i + 1 })
-      .where(and(eq(lessons.id, lessonIds[i]), eq(lessons.moduleId, moduleId)))
-      .run();
-  }
-  return getLessonsByModule(moduleId);
-}
-
-function moveLessonToModule(
-  lessonId: number,
-  targetModuleId: number,
-  targetPosition: number
-) {
-  const lesson = getLessonById(lessonId);
-  if (!lesson) return null;
-
-  const sourceModuleId = lesson.moduleId;
-
-  // 1. Close the gap in the source module
-  db.update(lessons)
-    .set({ position: sql`${lessons.position} - 1` })
-    .where(
-      and(
-        eq(lessons.moduleId, sourceModuleId),
-        gt(lessons.position, lesson.position)
-      )
-    )
-    .run();
-
-  // 2. Open a gap in the destination module
-  db.update(lessons)
-    .set({ position: sql`${lessons.position} + 1` })
-    .where(
-      and(
-        eq(lessons.moduleId, targetModuleId),
-        gte(lessons.position, targetPosition)
-      )
-    )
-    .run();
-
-  // 3. Move the lesson to the target module at the target position
-  return db
-    .update(lessons)
-    .set({ moduleId: targetModuleId, position: targetPosition })
-    .where(eq(lessons.id, lessonId))
-    .returning()
-    .get();
-}
-
-const courseEditorParamsSchema = z.object({
-  courseId: z.coerce.number().int(),
-});
-
-const courseEditorActionSchema = z.discriminatedUnion("intent", [
-  z.object({
-    intent: z.literal("add-lesson"),
-    moduleId: z.coerce.number().int(),
-    title: z.string().trim().min(1, "Lesson title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("rename-lesson"),
-    lessonId: z.coerce.number().int(),
-    title: z.string().trim().min(1, "Lesson title cannot be empty."),
-  }),
-  z.object({
-    intent: z.literal("reorder-lessons"),
-    moduleId: z.coerce.number().int(),
-    lessonIds: z.string().min(1, "Missing lesson IDs."),
-  }),
-  z.object({
-    intent: z.literal("move-lesson"),
-    lessonId: z.coerce.number().int(),
-    targetModuleId: z.coerce.number().int(),
-    targetPosition: z.coerce.number().int(),
-  }),
-  z.object({
-    intent: z.literal("delete-lesson"),
-    lessonId: z.coerce.number().int(),
-  }),
-]);
 
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.course?.title ?? "Edit Course";
@@ -218,8 +73,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  const user = await requireCurrentPerson(db, request);
-  const currentUserId = user.id;
+  await requireCurrentPerson(db, request);
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -252,120 +106,25 @@ export async function action({ params, request }: Route.ActionArgs) {
       );
     case "reorder-modules":
       return reorderCourseSections(db, request, params.courseId, command);
-  }
-
-  const parsed = parseFormData(formData, courseEditorActionSchema);
-  if (!parsed.success) {
-    throw data(Object.values(parsed.errors)[0] ?? "Invalid input.", {
-      status: 400,
-    });
-  }
-
-  if (user.role !== UserRole.Instructor && user.role !== UserRole.Admin) {
-    throw data("Only instructors and admins can edit courses.", {
-      status: 403,
-    });
-  }
-
-  const { courseId } = parseParams(params, courseEditorParamsSchema);
-
-  const course = getCourseById(courseId);
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  if (course.instructorId !== currentUserId && user.role !== UserRole.Admin) {
-    throw data("You can only edit your own courses.", { status: 403 });
-  }
-
-  const { intent } = parsed.data;
-
-  if (intent === "add-lesson") {
-    const { moduleId, title } = parsed.data;
-    const mod = getModuleById(moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Module not found in this course." },
-        { status: 404 }
+    case "add-lesson":
+      return createLesson(db, request, params.courseId, command);
+    case "rename-lesson":
+      return renameLesson(db, request, params.courseId, command);
+    case "delete-lesson":
+      return deleteLesson(
+        db,
+        request,
+        params.courseId,
+        command,
+        await defaultNotifications()
       );
-    }
-    createLesson(moduleId, title, null, null, null, null);
-    return { success: true, field: "lesson" };
+    case "move-lesson":
+      return moveLesson(db, request, params.courseId, command);
+    case "reorder-lessons":
+      return reorderLessons(db, request, params.courseId, command);
+    default:
+      throw data("Invalid action.", { status: 400 });
   }
-
-  if (intent === "rename-lesson") {
-    const { lessonId, title } = parsed.data;
-    const lesson = getLessonById(lessonId);
-    if (!lesson) {
-      return data({ error: "Lesson not found." }, { status: 404 });
-    }
-    const mod = getModuleById(lesson.moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Lesson not found in this course." },
-        { status: 404 }
-      );
-    }
-    updateLessonTitle(lessonId, title);
-    return { success: true, field: "lesson" };
-  }
-
-  if (intent === "reorder-lessons") {
-    const { moduleId, lessonIds: lessonIdsJson } = parsed.data;
-    const mod = getModuleById(moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Module not found in this course." },
-        { status: 404 }
-      );
-    }
-    const lessonIds: number[] = JSON.parse(lessonIdsJson);
-    reorderLessons(moduleId, lessonIds);
-    return { success: true, field: "lesson-reorder" };
-  }
-
-  if (intent === "move-lesson") {
-    const { lessonId, targetModuleId, targetPosition } = parsed.data;
-    const lesson = getLessonById(lessonId);
-    if (!lesson) {
-      return data({ error: "Lesson not found." }, { status: 404 });
-    }
-    const sourceMod = getModuleById(lesson.moduleId);
-    if (!sourceMod || sourceMod.courseId !== courseId) {
-      return data(
-        { error: "Lesson not found in this course." },
-        { status: 404 }
-      );
-    }
-    const targetMod = getModuleById(targetModuleId);
-    if (!targetMod || targetMod.courseId !== courseId) {
-      return data(
-        { error: "Target module not found in this course." },
-        { status: 404 }
-      );
-    }
-    moveLessonToModule(lessonId, targetModuleId, targetPosition);
-    return { success: true, field: "lesson-move" };
-  }
-
-  if (intent === "delete-lesson") {
-    const { lessonId } = parsed.data;
-    const lesson = getLessonById(lessonId);
-    if (!lesson) {
-      return data({ error: "Lesson not found." }, { status: 404 });
-    }
-    const mod = getModuleById(lesson.moduleId);
-    if (!mod || mod.courseId !== courseId) {
-      return data(
-        { error: "Lesson not found in this course." },
-        { status: 404 }
-      );
-    }
-    deleteLesson(lessonId);
-    return { success: true, field: "lesson" };
-  }
-
-  throw data("Invalid action.", { status: 400 });
 }
 
 function InlineEditableTitle({

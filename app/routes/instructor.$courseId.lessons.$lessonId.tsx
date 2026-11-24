@@ -2,17 +2,12 @@ import { useState, useEffect } from "react";
 import { Link, useFetcher, useBlocker } from "react-router";
 import { toast } from "sonner";
 import type { Route } from "./+types/instructor.$courseId.lessons.$lessonId";
-import { getCurrentUserId } from "~/lib/session";
-import {
-  UserRole,
-  users,
-  courses,
-  modules,
-  lessons,
-  quizzes,
-} from "~/db/schema";
 import { db } from "~/db";
-import { eq } from "drizzle-orm";
+import { requireCurrentPerson } from "~/modules/course-permissions/index.server";
+import {
+  getLessonEditor,
+  updateLesson,
+} from "~/modules/instructor-operations/lessons.server";
 import { Card, CardContent, CardHeader } from "~/components/ui/card";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -27,68 +22,6 @@ import {
   Save,
 } from "lucide-react";
 import { data, isRouteErrorResponse } from "react-router";
-import { z } from "zod";
-import { parseFormData, parseParams } from "~/lib/validation";
-
-const instructorLessonParamsSchema = z.object({
-  courseId: z.coerce.number().int(),
-  lessonId: z.coerce.number().int(),
-});
-
-const updateLessonSchema = z.object({
-  intent: z.literal("update-lesson"),
-  content: z.string().optional(),
-  videoUrl: z.string().trim().optional(),
-  durationMinutes: z.string().optional(),
-  githubRepoUrl: z.string().trim().optional(),
-});
-
-function getUserById(id: number) {
-  return db.select().from(users).where(eq(users.id, id)).get();
-}
-
-function getCourseById(id: number) {
-  return db.select().from(courses).where(eq(courses.id, id)).get();
-}
-
-function getModuleById(id: number) {
-  return db.select().from(modules).where(eq(modules.id, id)).get();
-}
-
-function getLessonById(id: number) {
-  return db.select().from(lessons).where(eq(lessons.id, id)).get();
-}
-
-function getQuizByLessonId(lessonId: number) {
-  return db.select().from(quizzes).where(eq(quizzes.lessonId, lessonId)).get();
-}
-
-function updateLesson(
-  id: number,
-  title: string | null,
-  content: string | null,
-  videoUrl: string | null,
-  durationMinutes: number | null,
-  githubRepoUrl: string | null = null
-) {
-  const updates: Record<string, unknown> = {};
-  if (title !== null) updates.title = title;
-  if (content !== null) updates.content = content;
-  if (videoUrl !== null) updates.videoUrl = videoUrl;
-  if (durationMinutes !== null) updates.durationMinutes = durationMinutes;
-  if (githubRepoUrl !== null) updates.githubRepoUrl = githubRepoUrl;
-
-  if (Object.keys(updates).length === 0) {
-    return getLessonById(id);
-  }
-
-  return db
-    .update(lessons)
-    .set(updates)
-    .where(eq(lessons.id, id))
-    .returning()
-    .get();
-}
 
 export function meta({ loaderData }: Route.MetaArgs) {
   const title = loaderData?.lesson?.title ?? "Edit Lesson";
@@ -99,142 +32,27 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export async function loader({ params, request }: Route.LoaderArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("Select a user from the DevUI panel to manage lessons.", {
-      status: 401,
-    });
-  }
-
-  const user = getUserById(currentUserId);
-
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
-    throw data("Only instructors and admins can access this page.", {
-      status: 403,
-    });
-  }
-
-  const courseId = parseInt(params.courseId, 10);
-  if (isNaN(courseId)) {
-    throw data("Invalid course ID.", { status: 400 });
-  }
-
-  const course = getCourseById(courseId);
-
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  if (course.instructorId !== currentUserId && user.role !== UserRole.Admin) {
-    throw data("You can only edit your own courses.", { status: 403 });
-  }
-
-  const lessonId = parseInt(params.lessonId, 10);
-  if (isNaN(lessonId)) {
-    throw data("Invalid lesson ID.", { status: 400 });
-  }
-
-  const lesson = getLessonById(lessonId);
-  if (!lesson) {
-    throw data("Lesson not found.", { status: 404 });
-  }
-
-  const mod = getModuleById(lesson.moduleId);
-  if (!mod || mod.courseId !== courseId) {
-    throw data("Lesson not found in this course.", { status: 404 });
-  }
-
-  const quiz = getQuizByLessonId(lessonId);
-
-  return { course, lesson, module: mod, quiz };
+  return getLessonEditor(db, request, params.courseId, params.lessonId);
 }
 
 export async function action({ params, request }: Route.ActionArgs) {
-  const currentUserId = await getCurrentUserId(request);
-
-  if (!currentUserId) {
-    throw data("You must be logged in.", { status: 401 });
+  await requireCurrentPerson(db, request);
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    throw data("Invalid form data.", { status: 400 });
   }
-
-  const user = getUserById(currentUserId);
-  if (
-    !user ||
-    (user.role !== UserRole.Instructor && user.role !== UserRole.Admin)
-  ) {
-    throw data("Only instructors and admins can edit lessons.", {
-      status: 403,
-    });
+  if ([...formData.keys()].some((key) => formData.getAll(key).length > 1)) {
+    throw data("Duplicate form fields.", { status: 400 });
   }
-
-  const { courseId, lessonId } = parseParams(
-    params,
-    instructorLessonParamsSchema
+  return updateLesson(
+    db,
+    request,
+    params.courseId,
+    params.lessonId,
+    Object.fromEntries(formData)
   );
-
-  const course = getCourseById(courseId);
-  if (!course) {
-    throw data("Course not found.", { status: 404 });
-  }
-
-  if (course.instructorId !== currentUserId && user.role !== UserRole.Admin) {
-    throw data("You can only edit your own courses.", { status: 403 });
-  }
-
-  const lesson = getLessonById(lessonId);
-  if (!lesson) {
-    throw data("Lesson not found.", { status: 404 });
-  }
-
-  const mod = getModuleById(lesson.moduleId);
-  if (!mod || mod.courseId !== courseId) {
-    throw data("Lesson not found in this course.", { status: 404 });
-  }
-
-  const formData = await request.formData();
-  const parsed = parseFormData(formData, updateLessonSchema);
-
-  if (!parsed.success) {
-    return data(
-      { error: Object.values(parsed.errors)[0] ?? "Invalid input." },
-      { status: 400 }
-    );
-  }
-
-  if (parsed.data.intent === "update-lesson") {
-    const {
-      content,
-      videoUrl,
-      durationMinutes: durationStr,
-      githubRepoUrl,
-    } = parsed.data;
-    const durationMinutes = durationStr ? parseInt(durationStr, 10) : null;
-
-    if (
-      durationMinutes !== null &&
-      (isNaN(durationMinutes) || durationMinutes < 0)
-    ) {
-      return data(
-        { error: "Duration must be a positive number." },
-        { status: 400 }
-      );
-    }
-
-    updateLesson(
-      lessonId,
-      null,
-      content ?? null,
-      videoUrl || null,
-      durationMinutes,
-      githubRepoUrl || null
-    );
-    return { success: true };
-  }
-
-  throw data("Invalid action.", { status: 400 });
 }
 
 export default function InstructorLessonEditor({
