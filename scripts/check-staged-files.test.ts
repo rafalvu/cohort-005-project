@@ -40,12 +40,19 @@ function stage(path: string, content: string | Buffer) {
 }
 
 function check() {
-  const result = spawnSync(process.execPath, [checker], {
+  const result = spawnSync(process.execPath, [runner], {
     cwd: repo,
     env,
     encoding: "utf8",
   });
   return { status: result.status, output: result.stdout + result.stderr };
+}
+
+function copyRunner() {
+  mkdirSync(join(repo, "scripts"), { recursive: true });
+  for (const file of ["run-pre-commit.mjs", "write-staged-formatting.mjs"]) {
+    copyFileSync(join(project, "scripts", file), join(repo, "scripts", file));
+  }
 }
 
 beforeEach(() => {
@@ -74,20 +81,48 @@ describe("staged-file checks", () => {
     });
   });
 
-  it("rejects staged formatting errors even when the working file is fixed", () => {
+  it("automatically formats the staged version when the working file is already fixed", () => {
     stage("example.ts", "const value=1\n");
     write("example.ts", "const value = 1;\n");
-    const before = git("diff", "--cached", "--binary");
     const result = check();
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(0);
     expect(result.output).toContain(
-      'Prettier formatting required: "example.ts"'
+      'Prettier formatted and staged: "example.ts"'
     );
-    expect(result.output).toContain("npx prettier --write");
-    expect(git("diff", "--cached", "--binary")).toBe(before);
+    expect(git("show", ":example.ts")).toBe("const value = 1;\n");
     expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(
       "const value = 1;\n"
     );
+  });
+
+  it("updates fully staged working files and preserves executable file modes", () => {
+    stage("example.ts", "const value=1\n");
+    chmodSync(join(repo, "example.ts"), 0o755);
+    git("add", "example.ts");
+    expect(check().status).toBe(0);
+    expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(
+      "const value = 1;\n"
+    );
+    expect(git("diff")).toBe("");
+    expect(git("ls-files", "--stage", "example.ts")).toMatch(/^100755 /);
+  });
+
+  it("formats partial staging without changing or staging the unstaged edits", () => {
+    stage("example.ts", "const value=1\n");
+    const working = "const value=2\n// leave this edit unstaged\n";
+    write("example.ts", working);
+    expect(check().status).toBe(0);
+    expect(git("show", ":example.ts")).toBe("const value = 1;\n");
+    expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(working);
+    expect(git("stash", "list")).toBe("");
+  });
+
+  it("preserves an unstaged deletion while formatting the staged file", () => {
+    stage("example.ts", "const value=1\n");
+    rmSync(join(repo, "example.ts"));
+    expect(check().status).toBe(0);
+    expect(git("show", ":example.ts")).toBe("const value = 1;\n");
+    expect(git("diff", "--name-status")).toBe("D\texample.ts\n");
   });
 
   it("ignores unstaged content and formatting configuration changes", () => {
@@ -119,13 +154,33 @@ describe("staged-file checks", () => {
     });
   });
 
+  it("checks the size after formatting and makes no changes when it fails", () => {
+    stage(
+      "example.ts",
+      `const values=[${Array(7_000).fill("1").join(",")}];\n`
+    );
+    const before = git("show", ":example.ts");
+    const result = check();
+    expect(result.status).toBe(1);
+    expect(result.output).toContain("limit is 5,000 tokens");
+    expect(git("show", ":example.ts")).toBe(before);
+    expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(before);
+  });
+
+  it("accepts files that formatting brings under the size limit", () => {
+    stage("example.ts", " ".repeat(20_001) + "const value=1\n");
+    expect(check().status).toBe(0);
+    expect(git("show", ":example.ts")).toBe("const value = 1;\n");
+  });
+
   it("preserves spaces, newlines, and leading dashes in file paths", () => {
     const path = "-odd name\n[example].ts";
     stage(path, "const value=1\n");
     expect(check()).toEqual({
-      status: 1,
+      status: 0,
       output: expect.stringContaining(JSON.stringify(path)),
     });
+    expect(git("show", `:${path}`)).toBe("const value = 1;\n");
   });
 
   it("checks modified and renamed files and ignores staged deletions", () => {
@@ -139,12 +194,10 @@ describe("staged-file checks", () => {
     expect(result.output).toContain(
       '"renamed.txt": approximately 5,001 tokens'
     );
-    expect(result.output).toContain(
-      'Prettier formatting required: "example.ts"'
-    );
+    expect(git("show", ":example.ts")).toBe("const value=2\n");
     git("rm", "--force", "--", "renamed.txt");
-    stage("example.ts", "const value = 2;\n");
     expect(check().status).toBe(0);
+    expect(git("show", ":example.ts")).toBe("const value = 2;\n");
   });
 
   it("exempts generated lockfiles and Drizzle snapshots only from size checks", () => {
@@ -155,9 +208,9 @@ describe("staged-file checks", () => {
     expect(check().status).toBe(0);
     stage("package-lock.json", '{"lockfileVersion":3}');
     expect(check()).toEqual({
-      status: 1,
+      status: 0,
       output: expect.stringContaining(
-        'Prettier formatting required: "package-lock.json"'
+        'Prettier formatted and staged: "package-lock.json"'
       ),
     });
     stage("handwritten_snapshot.json", json);
@@ -174,11 +227,17 @@ describe("staged-file checks", () => {
   });
 
   it("fails closed on syntax errors", () => {
+    stage("example.ts", "const value=1\n");
     stage("broken.ts", "const = ;\n");
+    const before = git("diff", "--cached", "--binary");
     expect(check()).toEqual({
       status: 1,
       output: expect.stringContaining('Prettier could not check "broken.ts"'),
     });
+    expect(git("diff", "--cached", "--binary")).toBe(before);
+    expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(
+      "const value=1\n"
+    );
   });
 
   it("installs the tracked hook and blocks an actual commit until fixed", () => {
@@ -200,10 +259,9 @@ describe("staged-file checks", () => {
     expect(git("config", "--local", "--get", "core.hooksPath").trim()).toBe(
       ".githooks"
     );
-    mkdirSync(join(repo, "scripts"));
-    copyFileSync(runner, join(repo, "scripts/run-pre-commit.mjs"));
+    copyRunner();
     symlinkSync(checker, join(repo, "scripts/check-staged-files.mjs"));
-    stage("example.ts", "const value=1\n");
+    stage("example.ts", "const = ;\n");
     const commit = () =>
       spawnSync("git", ["commit", "--quiet", "-m", "hook integration"], {
         cwd: repo,
@@ -213,15 +271,19 @@ describe("staged-file checks", () => {
     const rejected = commit();
     expect(rejected.status).toBe(1);
     expect(rejected.stdout + rejected.stderr).toContain(
-      "Prettier formatting required"
+      "Prettier could not check"
     );
-    stage("example.ts", "const value = 1;\n");
+    stage("example.ts", "const value=1\n");
     expect(commit().status).toBe(0);
+    expect(git("show", "HEAD:example.ts")).toBe("const value = 1;\n");
+    expect(git("diff")).toBe("");
   });
 
   it("stops a stalled check at the time budget and blocks the commit", () => {
     write("scripts/check-staged-files.mjs", "while (true) {}\n");
-    copyFileSync(runner, join(repo, "scripts/run-pre-commit.mjs"));
+    copyRunner();
+    stage("example.ts", "const value=1\n");
+    const before = git("diff", "--cached", "--binary");
     const result = spawnSync(
       process.execPath,
       [join(repo, "scripts/run-pre-commit.mjs")],
@@ -230,5 +292,9 @@ describe("staged-file checks", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("three-second budget");
     expect(result.stderr).toContain("checks were not completed");
+    expect(git("diff", "--cached", "--binary")).toBe(before);
+    expect(readFileSync(join(repo, "example.ts"), "utf8")).toBe(
+      "const value=1\n"
+    );
   });
 });

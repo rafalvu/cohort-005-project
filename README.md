@@ -106,27 +106,30 @@ You don't need these yet, but you'll be asked for them along the way. Both have 
 `prepare` script. For an existing checkout, run `npm run prepare` once to activate
 it (also needed if dependencies were installed with `--ignore-scripts`).
 
-The hook calls Node directly and only checks Git's staged file contents. Run the
+The hook calls Node directly and works on Git's staged file contents. Run the
 same checks manually with `npm run check:staged`:
 
-- Prettier checks supported file types using the staged `.prettierrc` settings.
+- Prettier formats supported file types using the staged `.prettierrc` settings
+  and automatically stages the formatting fixes.
 - Each added or modified regular file must be at most **5,000 estimated tokens**,
-  calculated as `Math.ceil(bytes / 4)` (20,000 bytes). Renamed files are checked
+  calculated after formatting as `Math.ceil(bytes / 4)` (20,000 bytes). Renamed files are checked
   at their destination; deleted files, symlinks, and submodules are skipped.
 - Generated lockfiles (`package-lock.json`, `npm-shrinkwrap.json`,
   `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, and `skills-lock.json`)
   and `drizzle/meta/*_snapshot.json` are exempt from the size limit. Prettier
-  still checks these files when it supports their format.
+  still formats these files when it supports their format.
 
-Git reads are batched to keep the hook fast. Checks have a **2.8-second timeout**,
-leaving startup headroom within a three-second budget. If they time out, the
-commit is blocked with a message to stage a smaller batch and retry.
+Git reads and writes are batched to keep the hook fast. Formatting and validation
+have a **2.5-second timeout**, leaving headroom for startup and applying fixes
+within a three-second budget. If they time out, the commit is blocked before any
+file or index changes, with a message to stage a smaller batch and retry.
 
-The hook only checks: it does not format, stage, or stash changes. Unstaged edits
-do not affect the result. If formatting fails, run
-`npx prettier --write -- "path/to/file"`, review the changes, and stage the
-intended hunks again. If the size limit fails, split the file by responsibility
-and follow the guidance printed by the hook. Run `npm run check:staged` to retry.
+Fully staged files receive the formatting fixes in both the index and working
+tree. For partially staged files, only the staged version is formatted; the
+working file stays untouched, preserving unstaged edits. The hook never stages
+those extra edits or stashes your work. Syntax errors or oversized formatted
+files still block the commit. If the size limit fails, split the file by
+responsibility and follow the printed guidance. Run `npm run check:staged` to retry.
 
 Whole-project checks (typechecking, module boundaries, ESLint, tests, and builds)
 run separately with `npm run check` on Node 24 and in CI. Browser accessibility

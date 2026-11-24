@@ -35,8 +35,7 @@ async function checkStagedFiles() {
     .toString()
     .split("\0");
   if (!records[0]) {
-    console.log("No staged files to check.");
-    return;
+    return { root: process.cwd(), staged: false, updates: [] };
   }
 
   // Use the staged settings too: an unstaged config edit must not change the
@@ -44,8 +43,20 @@ async function checkStagedFiles() {
   const config = JSON.parse(git("show", ":.prettierrc").toString());
   let failed = false;
   let oversized = false;
-  let unformatted = false;
+  const updates = [];
   const files = [];
+
+  function checkSize(path, label, bytes) {
+    const generated =
+      lockfiles.has(basename(path)) ||
+      /^drizzle\/meta\/\d+_snapshot\.json$/.test(path);
+    if (generated || bytes <= maxTokens * bytesPerToken) return;
+    console.error(
+      `${label}: approximately ${Math.ceil(bytes / bytesPerToken).toLocaleString("en-US")} tokens ` +
+        `(${bytes.toLocaleString("en-US")} bytes); limit is 5,000 tokens (20,000 bytes).`
+    );
+    failed = oversized = true;
+  }
 
   for (let index = 0; index < records.length - 1; index += 2) {
     const [, mode, , blob, status] = records[index].split(" ");
@@ -59,7 +70,7 @@ async function checkStagedFiles() {
     // Symlinks and submodules are references, not regular file contents.
     if (mode !== "100644" && mode !== "100755") continue;
 
-    files.push({ path, blob, label });
+    files.push({ path, blob, label, mode });
   }
 
   // Read sizes in one Git process instead of spawning one per staged file.
@@ -76,24 +87,14 @@ async function checkStagedFiles() {
   for (const [index, file] of files.entries()) {
     const { path, label } = file;
     const bytes = sizes[index];
-    const estimatedTokens = Math.ceil(bytes / bytesPerToken);
-    const generated =
-      lockfiles.has(basename(path)) ||
-      /^drizzle\/meta\/\d+_snapshot\.json$/.test(path);
-    if (!generated && estimatedTokens > maxTokens) {
-      console.error(
-        `${label}: approximately ${estimatedTokens.toLocaleString("en-US")} tokens ` +
-          `(${bytes.toLocaleString("en-US")} bytes); limit is 5,000 tokens (20,000 bytes).`
-      );
-      failed = oversized = true;
-      continue;
-    }
-
     try {
       const { inferredParser } = await prettier.getFileInfo(path, {
         resolveConfig: false,
       });
-      if (!inferredParser) continue;
+      if (!inferredParser) {
+        checkSize(path, label, bytes);
+        continue;
+      }
       formatFiles.push({ ...file, bytes, parser: inferredParser });
     } catch (error) {
       console.error(`Prettier could not check ${label}: ${error.message}`);
@@ -110,20 +111,19 @@ async function checkStagedFiles() {
       })
     : Buffer.alloc(0);
   let offset = 0;
-  for (const { path, label, bytes, parser } of formatFiles) {
+  for (const { path, label, bytes, parser, blob, mode } of formatFiles) {
     const start = contents.indexOf(10, offset) + 1;
     const source = contents.toString("utf8", start, start + bytes);
     offset = start + bytes + 1;
     try {
-      if (
-        !(await prettier.check(source, {
-          ...config,
-          filepath: path,
-          parser,
-        }))
-      ) {
-        console.error(`Prettier formatting required: ${label}`);
-        failed = unformatted = true;
+      const formatted = await prettier.format(source, {
+        ...config,
+        filepath: path,
+        parser,
+      });
+      checkSize(path, label, Buffer.byteLength(formatted));
+      if (formatted !== source) {
+        updates.push({ path, blob, mode, source, formatted });
       }
     } catch (error) {
       console.error(`Prettier could not check ${label}: ${error.message}`);
@@ -141,23 +141,21 @@ Split oversized files before committing:
 - Keep behavior unchanged and run the relevant checks. Do not minify, remove useful documentation, or split at arbitrary line counts just to pass.
 Stage the refactor, then rerun npm run check:staged.`);
   }
-  if (unformatted) {
-    console.error(
-      '\nRun npx prettier --write -- "path/to/file" for each reported file, review the changes, and stage the intended hunks again.'
-    );
-  }
   if (failed) {
     console.error(
       "\nPre-commit checks failed. Fix and re-stage before committing."
     );
     process.exitCode = 1;
   } else {
-    console.log("Staged files pass Prettier and the 5,000-token limit.");
+    return { root: process.cwd(), staged: true, updates };
   }
 }
 
 try {
-  await checkStagedFiles();
+  // This worker only prepares changes. The parent applies them after successful
+  // validation, so a timeout cannot interrupt a write to the index or worktree.
+  const prepared = await checkStagedFiles();
+  if (prepared) console.log(JSON.stringify(prepared));
 } catch (error) {
   console.error(`Unable to check staged files: ${error.message}`);
   process.exitCode = 1;
